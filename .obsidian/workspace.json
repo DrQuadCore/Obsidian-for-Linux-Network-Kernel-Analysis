@@ -8,7 +8,7 @@
         "type": "tabs",
         "children": [
           {
-            "id": "0a678ba892d673f7",
+            "id": "53356605278fdc50",
             "type": "leaf",
             "state": {
               "type": "markdown",
@@ -19,6 +19,18 @@
               },
               "icon": "lucide-file",
               "title": "README"
+            }
+          },
+          {
+            "id": "d994ab7bb02c041b",
+            "type": "leaf",
+            "state": {
+              "type": "excalidraw",
+              "state": {
+                "file": "Excalidraw/RPS-IPI 관계도.md"
+              },
+              "icon": "excalidraw-icon",
+              "title": "RPS-IPI 관계도"
             }
           }
         ]
@@ -198,8 +210,9 @@
       "obsidian-excalidraw-plugin:Create new drawing": false
     }
   },
-  "active": "0a678ba892d673f7",
+  "active": "53356605278fdc50",
   "lastOpenFiles": [
+    "Tags",
     "Inbox/tpcc 세팅.md",
     "Inbox/ftrace - write.md",
     "Inbox/open-cas-linux installation.md",
@@ -229,7 +242,6 @@
     "sock_recvmsg1.md",
     "//sock_recvmsg1.md",
     "박찬서/Tx/kernel_sendmsg().md",
-    "박찬서/Tx/sock_sendmsg().md",
     "Pasted image 20241122144853.png",
     "박찬서/Tx/Struct",
     "박찬서/Tx",

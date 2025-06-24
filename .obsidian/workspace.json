@@ -1,0 +1,247 @@
+{
+  "main": {
+    "id": "f2a22e934c7f9a17",
+    "type": "split",
+    "children": [
+      {
+        "id": "8f15a63ec4af0881",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0a678ba892d673f7",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "README.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "README"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "8d1c829b3834ffff",
+    "type": "split",
+    "children": [
+      {
+        "id": "55c19e8dbb8aaa83",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "f22328281f6da92e",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "파일 탐색기"
+            }
+          },
+          {
+            "id": "7fde18579dd9703c",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "검색"
+            }
+          },
+          {
+            "id": "513716109e953254",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          },
+          {
+            "id": "14dd9c03fa2dc5dd",
+            "type": "leaf",
+            "state": {
+              "type": "recent-files",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "플러그인이 더 이상 활성화돼있지 않음"
+            }
+          },
+          {
+            "id": "65b81f4b4c3e7335",
+            "type": "leaf",
+            "state": {
+              "type": "mk-path-view",
+              "state": {},
+              "icon": "layout-grid",
+              "title": "Spaces"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 288.5
+  },
+  "right": {
+    "id": "c6aa2f254e138378",
+    "type": "split",
+    "children": [
+      {
+        "id": "a8b3f122fbe7087b",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "0c205b969c309540",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "박찬서/11.1 미팅.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "11.1 미팅의 백링크"
+            }
+          },
+          {
+            "id": "4dc75fe68532ab28",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "박찬서/11.1 미팅.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "11.1 미팅의 나가는 링크"
+            }
+          },
+          {
+            "id": "f5774677d66be8cc",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "b486aef1ac191011",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "박찬서/11.1 미팅.md"
+              },
+              "icon": "lucide-list",
+              "title": "11.1 미팅 개요"
+            }
+          },
+          {
+            "id": "69100a17d38781ba",
+            "type": "leaf",
+            "state": {
+              "type": "git-view",
+              "state": {},
+              "icon": "lucide-file",
+              "title": "플러그인이 더 이상 활성화돼있지 않음"
+            }
+          }
+        ],
+        "currentTab": 4
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:빠른 전환기 열기": false,
+      "random-note:무작위 노트 열기": false,
+      "graph:그래프 뷰 열기": false,
+      "templates:템플릿 삽입": false,
+      "command-palette:명령어 팔레트 열기": false,
+      "workspaces:작업 공간 레이아웃 관리": false,
+      "custom-sort:Toggle custom sorting": false,
+      "obsidian-full-calendar:Open Full Calendar": false,
+      "markdown-table-editor:Open Markdown Table Editor": false,
+      "obsidian-excalidraw-plugin:Create new drawing": false
+    }
+  },
+  "active": "0a678ba892d673f7",
+  "lastOpenFiles": [
+    "Inbox/tpcc 세팅.md",
+    "Inbox/ftrace - write.md",
+    "Inbox/open-cas-linux installation.md",
+    "Inbox/ftrace for open-cas.md",
+    "Inbox/open-cas-linux 사용법.md",
+    "Inbox/Linux 처음 세팅하기.md",
+    "Inbox/Ram disk & nvme 성능 측정.md",
+    "Inbox/커널 다운그레이드.md",
+    "Inbox/ftrace - randread(analysis).md",
+    "Inbox/ftrace for open-cas1.md",
+    "Inbox/ftrace - randread.md",
+    "Inbox/ftrace - randread(analysis)1.md",
+    "Inbox/Nvme over TCP configuration.md",
+    "Inbox",
+    "박찬서/2_final report.hwp",
+    "Excalidraw/함수 콜 스택(RX).png",
+    "Excalidraw/함수 콜 스택latest.svg",
+    "Excalidraw/함수 콜 스택(RX).md",
+    "박찬서/Tx/tcp_sendmsg_locked().md",
+    "박찬서/Tx/sock_sendmsg_nosec().md",
+    "박찬서/Tx/tcp_push().md",
+    "박찬서/Tx/tcp_sendmsg().md",
+    "박찬서/send() 종합.md",
+    "박찬서/Tx/sendmsg().md",
+    "박찬서/무제 파일.md",
+    "박찬서/Tx/Struct/socket.md",
+    "sock_recvmsg1.md",
+    "//sock_recvmsg1.md",
+    "박찬서/Tx/kernel_sendmsg().md",
+    "박찬서/Tx/sock_sendmsg().md",
+    "Pasted image 20241122144853.png",
+    "박찬서/Tx/Struct",
+    "박찬서/Tx",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106220917.png",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106220852.png",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106220820.png",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106220012.png",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106215954.png",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106215820.png",
+    "황재훈/Research Intern/tcp_test/jae/Pasted image 20241106215036.png",
+    "황재훈/Research Intern/tcp_test/jae",
+    "황재훈/Research Intern/tcp_test",
+    "박찬서/미팅 노트"
+  ]
+}

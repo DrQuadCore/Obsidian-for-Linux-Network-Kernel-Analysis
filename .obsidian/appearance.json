@@ -1,0 +1,12 @@
+{
+  "cssTheme": "AnuPpuccin",
+  "theme": "moonstone",
+  "enabledCssSnippets": [
+    "custom-background",
+    "extended-colorschemes",
+    "custom-rainbow-colors",
+    "d",
+    "asdf"
+  ],
+  "accentColor": ""
+}

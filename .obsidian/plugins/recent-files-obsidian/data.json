@@ -1,0 +1,205 @@
+{
+  "recentFiles": [
+    {
+      "basename": "get_rps_cpu() 함수에 대한 로직 분석과 고찰 및 의의",
+      "path": "김기수/산협 프로젝트 2/백서 제작용/get_rps_cpu() 함수에 대한 로직 분석과 고찰 및 의의.md"
+    },
+    {
+      "basename": "Nvme over TCP configuration",
+      "path": "Inbox/Nvme over TCP configuration.md"
+    },
+    {
+      "basename": "ftrace - write",
+      "path": "Inbox/ftrace - write.md"
+    },
+    {
+      "basename": "open-cas-linux installation",
+      "path": "Inbox/open-cas-linux installation.md"
+    },
+    {
+      "basename": "ftrace for open-cas",
+      "path": "Inbox/ftrace for open-cas.md"
+    },
+    {
+      "basename": "open-cas-linux 사용법",
+      "path": "Inbox/open-cas-linux 사용법.md"
+    },
+    {
+      "basename": "Linux 처음 세팅하기",
+      "path": "Inbox/Linux 처음 세팅하기.md"
+    },
+    {
+      "basename": "Ram disk & nvme 성능 측정",
+      "path": "Inbox/Ram disk & nvme 성능 측정.md"
+    },
+    {
+      "basename": "커널 다운그레이드",
+      "path": "Inbox/커널 다운그레이드.md"
+    },
+    {
+      "basename": "ftrace - randread(analysis)",
+      "path": "Inbox/ftrace - randread(analysis).md"
+    },
+    {
+      "basename": "ftrace - randread",
+      "path": "Inbox/ftrace - randread.md"
+    },
+    {
+      "basename": "함수 콜 스택update",
+      "path": "Excalidraw/함수 콜 스택update.md"
+    },
+    {
+      "basename": "tcp_sendmsg_locked()",
+      "path": "박찬서/Tx/tcp_sendmsg_locked().md"
+    },
+    {
+      "basename": "sock_sendmsg_nosec()",
+      "path": "박찬서/Tx/sock_sendmsg_nosec().md"
+    },
+    {
+      "basename": "tcp_push()",
+      "path": "박찬서/Tx/tcp_push().md"
+    },
+    {
+      "basename": "tcp_sendmsg()",
+      "path": "박찬서/Tx/tcp_sendmsg().md"
+    },
+    {
+      "basename": "send() 종합",
+      "path": "박찬서/send() 종합.md"
+    },
+    {
+      "basename": "sendmsg()",
+      "path": "박찬서/Tx/sendmsg().md"
+    },
+    {
+      "basename": "socket",
+      "path": "박찬서/Tx/Struct/socket.md"
+    },
+    {
+      "basename": "무제 파일",
+      "path": "박찬서/무제 파일.md"
+    },
+    {
+      "basename": "kernel_sendmsg()",
+      "path": "박찬서/Tx/kernel_sendmsg().md"
+    },
+    {
+      "basename": "sock_sendmsg()",
+      "path": "박찬서/Tx/sock_sendmsg().md"
+    },
+    {
+      "basename": "ENUM",
+      "path": "박찬서/Tx/Struct/ENUM.md"
+    },
+    {
+      "basename": "inet_sendmsg()",
+      "path": "박찬서/Tx/inet_sendmsg().md"
+    },
+    {
+      "basename": "__sock_sendmsg()",
+      "path": "박찬서/Tx/__sock_sendmsg().md"
+    },
+    {
+      "basename": "msghdr",
+      "path": "박찬서/Tx/Struct/msghdr.md"
+    },
+    {
+      "basename": "sendto()",
+      "path": "박찬서/Tx/sendto().md"
+    },
+    {
+      "basename": "____sys_sendmsg()",
+      "path": "박찬서/Tx/____sys_sendmsg().md"
+    },
+    {
+      "basename": "___sys_sendmsg()",
+      "path": "박찬서/Tx/___sys_sendmsg().md"
+    },
+    {
+      "basename": "__sys_sendmsg()",
+      "path": "박찬서/Tx/__sys_sendmsg().md"
+    },
+    {
+      "basename": "send()",
+      "path": "박찬서/Tx/send().md"
+    },
+    {
+      "basename": "__sys_sendto()",
+      "path": "박찬서/Tx/__sys_sendto().md"
+    },
+    {
+      "basename": "cong_control test",
+      "path": "황재훈/Research Intern/tcp_test/jae/cong_control test.md"
+    },
+    {
+      "basename": "syscall_64.tbl",
+      "path": "박찬서/syscall_64.tbl.md"
+    },
+    {
+      "basename": "read()",
+      "path": "박찬서/read().md"
+    },
+    {
+      "basename": "100924",
+      "path": "황재훈/Research Intern/100924.md"
+    },
+    {
+      "basename": "understanding network host",
+      "path": "황재훈/Research Intern/pastNotion/understanding network host.md"
+    },
+    {
+      "basename": "sk_buff",
+      "path": "황재훈/Research Intern/pastNotion/sk_buff.md"
+    },
+    {
+      "basename": "11.1 미팅",
+      "path": "박찬서/11.1 미팅.md"
+    },
+    {
+      "basename": "11.1 미팅",
+      "path": "박찬서/미팅 노트/11.1 미팅.md"
+    },
+    {
+      "basename": "Run Queue & Wait Queue",
+      "path": "박찬서/Run Queue & Wait Queue.md"
+    },
+    {
+      "basename": "함수 콜 스택 chan",
+      "path": "Excalidraw/함수 콜 스택 chan.md"
+    },
+    {
+      "basename": "tcp_queue_rcv()",
+      "path": "Encyclopedia of NetworkSystem/Function/net-ipv4/tcp_queue_rcv().md"
+    },
+    {
+      "basename": "ep_poll()",
+      "path": "박찬서/ep_poll().md"
+    },
+    {
+      "basename": "select()",
+      "path": "박찬서/select().md"
+    },
+    {
+      "basename": "RPS-IPI 관계도",
+      "path": "Excalidraw/RPS-IPI 관계도.md"
+    },
+    {
+      "basename": "주요 개념 구조도",
+      "path": "Excalidraw/주요 개념 구조도.md"
+    },
+    {
+      "basename": "EEVDF(Earliest Eligible Virtual Deadline First)",
+      "path": "박찬서/EEVDF(Earliest Eligible Virtual Deadline First).md"
+    },
+    {
+      "basename": "ice_clean_rx_irq()",
+      "path": "Encyclopedia of NetworkSystem/Function/drivers-net-ethernet-intel-ice/ice_clean_rx_irq().md"
+    },
+    {
+      "basename": "xdp_prepare_buff()",
+      "path": "Encyclopedia of NetworkSystem/Function/include-net/xdp_prepare_buff().md"
+    }
+  ],
+  "omittedPaths": []
+}

@@ -1,3 +1,5 @@
 *.mdc
 *.mdb
 .obsidian
+.trash
+.space

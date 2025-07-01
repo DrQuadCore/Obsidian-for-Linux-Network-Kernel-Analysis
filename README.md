@@ -3,7 +3,7 @@ Welcome to SKKU NetSys Lab Undergraduate Obsidian for Linux Network Kernel Analy
 
 > Linux 6.9를 기준으로 작성되었으며, NIC은 intel 100G NIC(aka ICE)를 사용한다고 가정하였습니다.
 
-아래는 디렉토리 별 설명을 작성해두었습니다. 
+아래는 디렉토리 별 설명을 작성해두었습니다.
 ## Encyclopedia of NetworkSystem
 파일의 단위는 하나의 Function과 Struct를 기준으로 작성되어있습니다.
 

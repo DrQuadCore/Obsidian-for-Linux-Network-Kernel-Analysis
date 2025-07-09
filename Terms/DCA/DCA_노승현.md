@@ -24,6 +24,18 @@ sticker: ""
     - **S**hared: 캐시-메모리 동일, 다른 캐시에도 있음
     - **I**nvalid: 캐시 내용이 무효
 - 이상적 개념
-    - only cache에만 저장한 후, write-back방식으로 DRAM에 저장
+    - only cache에만 저장한 후, write-back방식으로 DRAM에 저장한다.
 - 현실적
     - Write-Through
+- TLP 받은 후 내부 흐름
+	PCIe TLP (non-coherent)
+		  ↓
+	PCIe Root Complex
+	  → 주소 영역 및 DDIO 설정 확인
+	  → Interconnect Coherent 트랜잭션으로 변환
+	     (예: Write-Invalidate or Write-Snoop)
+		  ↓
+	System Interconnect + SCU
+	  → Snoop broadcast
+		  ↓
+	L3 Cache (LLC, DDIO 영역)에 write

@@ -41,15 +41,14 @@
 	  → Interconnect Coherent 트랜잭션으로 변환
 	     (예: Write-Invalidate or Write with Snoop)
 		  ↓
-	System Interconnect + SCU(어느 캐시가 어느 주소에 대한 상태인지 등을 알고 어디로 보낼 지 결정, MESI 결정)
-	  → Snoop broadcast
-		  ↓
-	L3 Cache (LLC, DDIO 영역)에 write
+	System Interconnect + SCU(어느 캐시의 어느 주소에 대한 MESI상태를 알고있어, 어디로 보낼 지 결정, MESI를 어떻게 변경할 지 결정)
+	  → Targeted Snoop/Snoop broadcast
 
-| 단계  | 기존 방식 (DMA 사용)                                      | DCA 방식                         |
-| --- | --------------------------------------------------- | ------------------------------ |
-| 1   | NIC가 메모리에 데이터 저장 -> 해당 주소의 캐시라인은 Invalid (I) 처리됨    | NIC가 데이터를 CPU Cache로 직접 씀      |
-| 2   | CPU가 나중에 해당 데이터 읽을 때 → **Compulsory cache miss** 발생 | 데이터가 이미 Cache에 있음 → **Hit** 가능 |
-| 3   | CPU가 캐시 miss 시 메모리 접근 → 대기 시간 큼                     | 메모리 접근 없이 Cache 바로 사용          |
-| 4   | NIC는 항상 메모리 접근 → 불필요한 memory bandwidth 소비           | 메모리 접근이 줄어듦 → bandwidth 절약     |
+| 단계  | 기존 방식 (DMA 사용)                                                 | DCA 방식                                                                                    |
+| --- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1   | NIC에서 수신한 데이터는 PCIe Root Complex에서 DRAM Controller로 전송되어 저장된다. | NIC에서 수신한 데이터는 LLC로 전송되어 저장하며, 모든 캐시에 해당 주소의 캐시 라인을 Invalid 상태로 전이시킨다. (Write with Snoop) |
+| 2   | 모든 캐시에서 해당 주소의 캐시 라인을 Invalid 상태로 전이시킨다.(Write-Invalidate)     | 해당 CPU가 해당 주소에 접근 시, 캐시에 이미 데이터 존재하여 Cache Hit가 발생한다.                                     |
+| 3   | CPU가 해당 주소에 접근 시,  cache miss가 발생하고 DRAM에 접근하여 데이터를 읽어오게 된다.   | 다른 CPU가 해당 주소에 접근 시, LLC에서 데이터를 읽고 자신의 캐시에 로드합니다.                                         |
+
+
 

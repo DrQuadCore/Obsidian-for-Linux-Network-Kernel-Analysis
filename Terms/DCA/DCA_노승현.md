@@ -3,12 +3,7 @@ sticker: ""
 ---
 1. 배경
     - 고속 네트워크 환경의 변화
-<<<<<<< HEAD
-        - 10Gbps 네트워크 환경에서는 64바이트 패킷 기준으로 초당80만 개의  약 1,4패킷 처리 요구.
-        - 네트워크 프로토콜 (특히 TCP/IP)은 메모리 접근량이 많고 latency-sensitive한 작업이 많음.
-=======
-        - 10Gbps 네트워크 환경에서는 64바이트 패킷 기준으로 초당 약 1,480만 개의 패킷 처리 요구한다.
->>>>>>> ab51bdc39cf3d06caf98ca7b38df48b4b711528a
+        - 10Gbps 네트워크 환경에서는 64바이트 패킷 기준으로 초당 약 1,480만 개의  패킷 처리 요구한다.
     - 기존 시스템
         - NIC(Network Interface Card)는 DMA를 통해 데이터를 시스템 메모리에 복사하고,
         - CPU는 그 데이터를 다시 메모리에서 읽어오기 때문에 cache miss 발생률이 매우 높다.
@@ -24,23 +19,20 @@ sticker: ""
 | 3   | CPU가 캐시 miss 시 메모리 접근 → 대기 시간 큼                                                                                                                     | 메모리 접근 없이 Cache 바로 사용          |
 | 4   | NIC는 항상 메모리 접근 → 불필요한 memory bandwidth 소비                                                                                                           | 메모리 접근이 줄어듦 → bandwidth 절약     |
 - MESI 프로토콜: CPU cache 일관성을 유지하기 위한 대표적인 프로토콜
-    - **M**odified: 캐시 데이터가 메모리보다 최신이고, 메모리에 쓰지 않음
-    - **E**xclusive: 캐시만 데이터 소유, 메모리와 동일
-    - **S**hared: 캐시-메모리 동일, 다른 캐시에도 있음
-    - **I**nvalid: 캐시 내용이 무효
-- 이상적 개념
-    - only cache에만 저장한 후, write-back방식으로 DRAM에 저장한다.
-- 현실적
-    - Write-Through
+    - **M**odified: 캐시 데이터가 메모리보다 최신이고, 메모리에 쓰지 않았다.
+    - **E**xclusive: 한 캐시만 데이터를 소유하고, 메모리와 동일하다.
+    - **S**hared: 캐시-메모리 동일하며, 다른 캐시에도 존재한다.
+    - **I**nvalid: 캐시 내용이 무효하다.
 - TLP 받은 후 내부 흐름
 	PCIe TLP (non-coherent)
 		  ↓
 	PCIe Root Complex
 	  → 주소 영역 및 DDIO 설정 확인
 	  → Interconnect Coherent 트랜잭션으로 변환
-	     (예: Write-Invalidate or Write-Snoop)
+	     (예: Write-Invalidate or Write with Snoop)
 		  ↓
-	System Interconnect + SCU
+	System Interconnect + SCU(어느 캐시가 어느 주소에 대한 상태인지 등을 알고 어디로 보낼 지 결정, MESI 결정)
 	  → Snoop broadcast
 		  ↓
 	L3 Cache (LLC, DDIO 영역)에 write
+	

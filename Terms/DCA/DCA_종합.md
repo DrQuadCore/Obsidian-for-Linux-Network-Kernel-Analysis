@@ -9,16 +9,60 @@
 	- 캐시 미스로 인해 메모리 -> 캐시와 같은 데이터 복사
 - 결과적으로 memory latency가 발생하여 기존의 방식은 고속 네트워크 환경에서 부적합하다.
 
-## 작동 방식(인텔 DDIO 기준)
-0. NIC와 CPU가 PCIe로 연결되어있다.
-1. NIC 등 I/O 장치가 패킷을 수신한다.
-2. DMA 엔진에서 TLP(Transaction Layer Packet)에 Steering Tag를 설정한다.
+## 기본 작동 방식(인텔 DDIO 기준)
+1. NIC와 CPU가 PCIe로 연결되어있다.
+2. NIC 등 I/O 장치가 패킷을 수신한다.
+3. DMA 엔진에서 TLP(Transaction Layer Packet)에 Steering Tag를 설정한다.
 	- TLP : PCIe의 계층에서 데이터를 전달하는 단위이다.
 	- Steering Tag : 해당 TLP가 어느 캐시에 대한 내용인지를 나타낸다.
-3. TLP를 CPU(칩셋)로 보내면 CPU의 Uncore 부분 중 PCIe Root Complex가 해당 TLP를 확인한다.
-4. TLP의 Steering Tag를 확인하고 CPU의 LLC 컨트롤러를 통해 데이터를 캐시나 메모리로 보낸다.  
+4. TLP를 CPU(칩셋)로 보내면 CPU의 Uncore 부분 중 PCIe Root Complex가 해당 TLP를 확인한다.
+5. TLP의 Steering Tag를 확인하고 CPU의 메모리 컨트롤러나 LLC 컨트롤러를 통해 데이터를 캐시나 메모리에 저장한다.  
 	- ST를 통해 판단은 PCIe Root Complex가 하고 실제적인 동작은 LLC 컨트롤러를 통해 진행한다.
-5. 캐시로 보낸 경우, 코어에서 패킷 처리 후 필요시에만 DRAM에 기록한다.
+
+## 상황별 작동 방식
+- 보통 UMA는 단일 소켓 환경, NUMA는 멀티 소켓 환경이다.
+	- 소켓 인터리빙을 이용한 멀티 소켓 UMA, 소켓 분할을 통한 단일 소켓 NUMA 환경이 있을 수 있으나, 일반적이지 않다.
+- NUMA 환경에서 remote NUMA 노드로 DCA는 불가능하다.
+### UMA / DMA
+1. NIC이 패킷을 수신한다.
+2. DMA 엔진에서 TLP를 설정한다.
+	1. DMA를 사용할 예정이므로 vm_st_valid 값을 0으로 설정한다.
+	2. rx 디스크립터를 보고 데이터가 저장될 address를 확인한다.
+	3. TLP 헤더에 해당 address를 기록한다.
+3. NIC과 PCIe 레인으로 연결된 CPU(칩셋)로 TLP를 전송한다.
+4. CPU의 PCIe Root Complex가 TLP를 확인한다.
+5. 메모리 컨트롤러를 통해 address가 가리키고 있는 메모리에 데이터를 적재한다.
+6. 메모리에 데이터가 올라갔으면 DMA 엔진이 특정 코어에 IRQ를 발생시킨다.
+	1. aRFS 등으로 패킷을 직접적으로 처리할 코어이다.
+7. 해당 코어가 NAPI를 통하여 패킷을 가져와 처리한다.
+### UMA / DCA
+1. NIC이 패킷을 수신한다.
+2. DMA 엔진에서 TLP 및 ST를 설정한다.
+	1. DCA를 사용할 예정이므로 vm_st_valid 값을 1로 설정한다.
+	2. vm_st에 소켓 번호, 캐시 set, 캐시 way 정보를 설정한다.
+	3. rx 디스크립터를 보고 TLP 헤더에 address를 기록한다.
+3. NIC과 PCIe 레인으로 연결된 CPU로 TLP를 전송한다.
+4. CPU의 PCIe Root Complex과 TLP와 ST를 확인한다.
+5. LLC 컨트롤러의 DDIO 모듈이 ST를 보고 캐시에 해당 데이터를 적재한다.
+6. 캐시에 데이터가 올라갔으면 DMA 엔진이 특정 코어에 IRQ를 발생시킨다.
+7. 해당 코어가 NAPI를 통하여 패킷을 가져와 처리한다.
+### NUMA / DMA / Local node
+- UMA / DMA 상황과 동일하다.
+### NUMA / DCA / Local node
+- NUMA / DCA 상황과 동일하다.
+### NUMA / DMA / Remote node
+1. NIC이 패킷을 수신한다.
+2. DMA 엔진에서 TLP를 설정한다.
+	1. DMA를 사용할 예정이므로 vm_st_valid 값을 0으로 설정한다.
+	2. rx 디스크립터를 보고 TLP 헤더에 remote 노드의 address를 기록한다.
+3. NIC과 PCIe 레인으로 연결된 CPU로 TLP를 전송한다.
+4. CPU의 PCIe Root Complex가 TLP를 확인한다.
+	1. address가 local 노드가 아니므로 remote 노드로 보내고자 한다.
+5. CPU간 인터커넥트를 통해 local 노드에서 remote 노드로 메세지를 전송한다.
+	1. 메세지 양식은 제조사별로 다르며, 비공개이다.
+6. remote 노드의 CPU가 메세지를 받아 해당 CPU의 메모리 컨트롤러가 remote 메모리에 데이터를 적재한다.
+7. DMA 엔진이 특정 코어에 IRQ를 발생시킨다.
+8. 해당 코어가 NAPI를 통하여 패킷을 가져와 처리한다.
 
 ## 관련 문제
 - DCA가 활성화된 경우, DRAM이 아닌 캐시에만 데이터가 쓰여진다.
@@ -27,7 +71,7 @@
 - 추후, 해당 데이터를 읽기 위해선 다시 DRAM에서 캐시로 데이터를 복사해야 한다.
 	- 오버헤드 발생!
 
-## DMA 방식과 DCA 방식 캐시 상태 변화
+## DMA 방식과 DCA 방식의 캐시 상태 변화
 - MESI 프로토콜: CPU cache 일관성을 유지하기 위한 대표적인 프로토콜이다.
     - **M**odified: 캐시 데이터가 메모리보다 최신이고, 메모리에 쓰여지지 않은 상태이다.
     - **E**xclusive: 해당 캐시에서만 데이터를 소유하고 있으며, 메모리와 동일한 데이터이다.

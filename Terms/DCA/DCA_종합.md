@@ -15,6 +15,8 @@
 3. DMA 엔진에서 TLP(Transaction Layer Packet)에 Steering Tag를 설정한다.
 	- TLP : PCIe의 계층에서 데이터를 전달하는 단위이다.
 	- Steering Tag : 해당 TLP가 어느 캐시에 대한 내용인지를 나타낸다.
+		- 데이터를 저장할 캐시 set, 캐시 way에 대한 정보를 나타낸다.
+		- DMA 엔진은 실제 캐시 구조를 모르기 때문에 단지 특정 set과 way를 선호한다만 나타내는 것이며, 실제 캐시에서의 저장 위치는 다를 수 있다.
 4. TLP를 CPU(칩셋)로 보내면 CPU의 Uncore 부분 중 PCIe Root Complex가 해당 TLP를 확인한다.
 5. TLP의 Steering Tag를 확인하고 CPU의 메모리 컨트롤러나 LLC 컨트롤러를 통해 데이터를 캐시나 메모리에 저장한다.  
 	- ST를 통해 판단은 PCIe Root Complex가 하고 실제적인 동작은 LLC 컨트롤러를 통해 진행한다.

@@ -10,15 +10,17 @@
 
 **동작**
 1. cpu가 virtual address로 메모리 접근 시도
-2. MMU가 TLB lookup 
-	2-1. TLB Miss
-	  → page table을 walk하여 VA → PA 매핑 search
-	  → 해당 매핑 정보를 TLB에 새로 caching
-	  → access 재시도
-	2-2. TLB Hit:
-		→ 매핑 정보를 바탕으로 flag bits 검사
-		→ 접근이 가능하면 physical address 반환
-		→ 접근이 불가능한 경우,  Exception 발생
+2. MMU가 TLB lookup  
+   2-1. TLB Miss  
+   → page table을 walk하여 VA → PA 매핑 search  
+   → 해당 매핑 정보를 TLB에 새로 caching  
+   → access 재시도  
+
+   2-2. TLB Hit  
+   → 매핑 정보를 바탕으로 flag bits 검사  
+   → 접근이 가능하면 physical address 반환  
+   → 접근이 불가능한 경우, Exception 발생
+
 ### IOMMU 
 **정의**
 - device가 사용하는 I/O virtual address(= IOVA) 를 physical address로 translate 해 주는 HW 
@@ -63,12 +65,14 @@
 
 ### IOMMU 기반 DMA 처리 흐름 - 수행 단계
 1. driver로부터 설정된 IOVA 범위를 바탕으로, device가 DMA 요청 전송
-2. IOMMU가 IOTLB(IOMMU 내부의 캐시) lookup 
-	2.1. IOTLB Miss
-	  → page table을 walk하여 IOVA → PA 매핑 search
-	  → 해당 매핑 정보를 IOTLB에 새로 caching
+2. IOMMU가 IOTLB(IOMMU 내부의 캐시) lookup  
+   2.1. IOTLB Miss  
+	→ page table을 walk하여 IOVA → PA 매핑 search  
+	→ 해당 매핑 정보를 IOTLB에 새로 caching  
 	  (해당 IOVA의 매핑이 존재하지 않는 경우, page fault처럼 OS가 개입하여 매핑을 생성하는 구조 아니라 IOMMU가 fault를 발생시키고 DMA 요청은 drop 되거나 시스템에 fault report를 남김)
-	2.2. IOTLB Hit
-		→ 매핑 정보를 바탕으로 flag bits 검사
-		→ 접근이 가능하면 physical address 반환
-		→ 접근이 불가능한 경우,  Exception 발생
+	
+   2.2. IOTLB Hit  
+	→ 매핑 정보를 바탕으로 flag bits 검사  
+	→ 접근이 가능하면 physical address 반환  
+	→ 접근이 불가능한 경우,  Exception 발생  
+	

@@ -18,7 +18,7 @@ static inline int fib_lookup(struct net *net, const struct flowi4 *flp,
   
     tb = fib_get_table(net, RT_TABLE_MAIN);
     if (tb)
-        err = fib_table_lookup(tb, flp, res, flags | FIB_LOOKUP_NOREF);
+        err = fib_table_lookup(tb, flp, res, flags | FIB_LOOKUP_NOREF); // [[fib_table_lookup()]]
   
     if (err == -EAGAIN)
         err = -ENETUNREACH;
@@ -36,3 +36,23 @@ static inline int fib_lookup(struct net *net, const struct flowi4 *flp,
 >이 테이블을 가지고 `fib_table_lookup()`함수를 호출하여 주어진 테이블을 lookup하여 포워딩을 위한 fib를 찾게 된다.
 
 [[fib_table_lookup()]]
+
+---
+fib_result 구조체 세팅은 table을 탐색하며 이루어진다. fib_result 구조체의 정의는 다음과 같이 되어있다.
+
+```c
+struct fib_result {
+	__be32			prefix;
+	unsigned char		prefixlen;
+	unsigned char		nh_sel; // 다음 홉 개수
+	unsigned char		type; // 패킷 처리 방식
+	unsigned char		scope;
+	u32			tclassid;
+	struct fib_nh_common	*nhc;
+	struct fib_info		*fi;
+	struct fib_table	*table; // fib table을 가리키는 포인터
+	struct hlist_head	*fa_head;
+};
+```
+
+fib_lookup() 함수는 fib_get_table() 함수로 fib table을 불러와 fib_table_lookup() 함수로 table을 탐색한다.

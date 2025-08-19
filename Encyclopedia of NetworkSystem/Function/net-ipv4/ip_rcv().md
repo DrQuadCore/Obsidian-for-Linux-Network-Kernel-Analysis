@@ -16,20 +16,20 @@ Location: /net/ipv4/ip_input.c
 int ip_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev)
 {
 	struct net *net = dev_net(dev);
-	  
-	skb = ip_rcv_core(skb, net);
+	// packet 검사
+	skb = ip_rcv_core(skb, net); // [[ip_rcv_core()]]
 	if (skb == NULL)
 		return NET_RX_DROP;
 	  
 	return NF_HOOK(NFPROTO_IPV4, NF_INET_PRE_ROUTING,
 				net, NULL, skb, dev, NULL,
-				ip_rcv_finish);`
+				ip_rcv_finish); // [[NF_HOOK()]]
 }
 ```
 
 >L3 protocol handler Layer이다.
 >`ip_rcv_core()`함수를 호출하여 핵심 로직이 실행되고, 이에 대한 `return`으로 패킷의 drop 여부를 결정하게 된다.
 
-[[ip_rcv_core()]]
+[[ip_rcv_core()]] 
 [[ip_rcv_finish()]]
 [[NF_HOOK()|NF_HOOK()]]

@@ -23,7 +23,8 @@ Location: /net/core/dev.c
     	trace_netif_receive_skb(skb);
     
     	orig_dev = skb->dev;
-    
+
+		// L4, L3, L2 header의 포인터를 재설정 (위치를 올바르게 다시 지정)
     	skb_reset_network_header(skb);
     	if (!skb_transport_header_was_set(skb))
     		skb_reset_transport_header(skb);
@@ -35,7 +36,8 @@ Location: /net/core/dev.c
     	skb->skb_iif = skb->dev->ifindex;
     
     	__this_cpu_inc(softnet_data.processed);
-    
+
+		// Generic XDP가 켜져 있으면 XDP program 실행
     	if (static_branch_unlikely(&generic_xdp_needed_key)) {
     		int ret2;
     
@@ -43,31 +45,33 @@ Location: /net/core/dev.c
     		ret2 = do_xdp_generic(rcu_dereference(skb->dev->xdp_prog),
     				      &skb);
     		migrate_enable();
-    
+
     		if (ret2 != XDP_PASS) {
     			ret = NET_RX_DROP;
     			goto out;
     		}
     	}
-    
+
+		// VLAN 태그 제거 
     	if (eth_type_vlan(skb->protocol)) {
     		skb = skb_vlan_untag(skb);
     		if (unlikely(!skb))
     			goto out;
     	}
-    
+
+		// Traffic Classify / TAPs
     	if (skb_skip_tc_classify(skb))
     		goto skip_classify;
     
     	if (pfmemalloc)
     		goto skip_taps;
-    
+
     	list_for_each_entry_rcu(ptype, &net_hotdata.ptype_all, list) {
     		if (pt_prev)
     			ret = deliver_skb(skb, pt_prev, orig_dev); // [[Encyclopedia of NetworkSystem/Function/net-core/deliver_skb().md|deliver_skb()]]
     		pt_prev = ptype;
     	}
-    
+
     	list_for_each_entry_rcu(ptype, &skb->dev->ptype_all, list) {
     		if (pt_prev)
     			ret = deliver_skb(skb, pt_prev, orig_dev); // [[Encyclopedia of NetworkSystem/Function/net-core/deliver_skb().md|deliver_skb()]]
@@ -167,21 +171,24 @@ Location: /net/core/dev.c
     		__vlan_hwaccel_clear_tag(skb);
     	}
     
-    	type = skb->protocol;
+    	type = skb->protocol; // skb ethertype을 알아냄
     
     	/* deliver only exact match when indicated */
+	    // ptype_base 해시 테이블에서 ethertype을 기반으로 버킷을 찾음
+		// 각 버킷(bucket)이 struct packet_type의 linked list를 가리킴.
+    	// struct list_head ptype_base[PTYPE_HASH_SIZE] __read_mostly;
     	if (likely(!deliver_exact)) {
     		deliver_ptype_list_skb(skb, &pt_prev, orig_dev, type,
     				       &ptype_base[ntohs(type) &
-    						   PTYPE_HASH_MASK]);
+    						   PTYPE_HASH_MASK]); //[[deliver_ptype_list_skb]]
     	}
     
     	deliver_ptype_list_skb(skb, &pt_prev, orig_dev, type,
-    			       &orig_dev->ptype_specific);
+    			       &orig_dev->ptype_specific); //[[deliver_ptype_list_skb]]
     
     	if (unlikely(skb->dev != orig_dev)) {
     		deliver_ptype_list_skb(skb, &pt_prev, orig_dev, type,
-    				       &skb->dev->ptype_specific);
+    				       &skb->dev->ptype_specific); //[[deliver_ptype_list_skb]]
     	}
     
     	if (pt_prev) {
@@ -216,3 +223,26 @@ Location: /net/core/dev.c
 [[Encyclopedia of NetworkSystem/Function/net-core/deliver_skb().md|deliver_skb()]]
 
 > 각종 체크를 통해 패킷을 드랍하거나 스택을 올려보내는 처리를 수행한다. 중간에 모든 entry에 대하여 deliver_skb() 함수를 호출해서 스택 위로 올려보내는 역할을 수행하게 된다.
+
+---
+```c 
+struct packet_type {
+	__be16			type;	/* This is really htons(ether_type). */
+	bool			ignore_outgoing;
+	struct net_device	*dev;	/* NULL is wildcarded here	     */
+	netdevice_tracker	dev_tracker;
+	int			(*func) (struct sk_buff *,
+					 struct net_device *,
+					 struct packet_type *,
+					 struct net_device *);
+	void			(*list_func) (struct list_head *,
+					      struct packet_type *,
+					      struct net_device *); // 핸들러
+	bool			(*id_match)(struct packet_type *ptype,
+					    struct sock *sk);
+	struct net		*af_packet_net;
+	void			*af_packet_priv;
+	struct list_head	list;
+};
+```
+

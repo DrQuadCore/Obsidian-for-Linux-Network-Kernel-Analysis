@@ -26,21 +26,21 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 		if (unlikely(err))
 			goto drop_error;
 	}
-	  
+	// IP 계층에서 early demux가 가능한지 확인 
 	if (READ_ONCE(net->ipv4.sysctl_ip_early_demux) &&
 		!skb_dst(skb) &&
 		!skb->sk &&
 		!ip_is_fragment(iph)) {
 		switch (iph->protocol) {
-		case IPPROTO_TCP:
+		case IPPROTO_TCP: // TCP 패킷에 대해 미리 소켓 lookup이 가능한지 확인
 			if (READ_ONCE(net->ipv4.sysctl_tcp_early_demux)) {
-				tcp_v4_early_demux(skb);
+				tcp_v4_early_demux(skb); // [[tcp_v4_early_demux()]]
 				  
 				/* must reload iph, skb->head might have changed */
 				iph = ip_hdr(skb);
 			}
 			break;
-		case IPPROTO_UDP:
+		case IPPROTO_UDP: // udp protocol에 대해 early demux가 가능한지 확인
 			if (READ_ONCE(net->ipv4.sysctl_udp_early_demux)) {
 				err = udp_v4_early_demux(skb);
 				if (unlikely(err))
@@ -57,9 +57,10 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 	* Initialise the virtual path cache for the packet. It describes
 	* how the packet travels inside Linux networking.
 	*/
+	// skb에 유효한 dst_entry가 존재하지 않는다면 
 	if (!skb_valid_dst(skb)) {
 		err = ip_route_input_noref(skb, iph->daddr, iph->saddr,
-						iph->tos, dev);
+						iph->tos, dev); // [[ip_route_input_noref()]]
 		if (unlikely(err))
 			goto drop_error;
 	} else {
@@ -136,3 +137,5 @@ drop_error:
 
 [[tcp_v4_early_demux()]]
 [[ip_route_input_noref()]]
+
+---

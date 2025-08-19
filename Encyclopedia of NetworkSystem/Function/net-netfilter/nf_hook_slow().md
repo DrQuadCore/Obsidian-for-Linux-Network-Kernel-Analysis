@@ -17,7 +17,7 @@ int nf_hook_slow(struct sk_buff *skb, struct nf_hook_state *state,
 	int ret;
 
 	for (; s < e->num_hook_entries; s++) {
-		verdict = nf_hook_entry_hookfn(&e->hooks[s], skb, state);
+		verdict = nf_hook_entry_hookfn(&e->hooks[s], skb, state); // [[nf_hook_entry_hookfn()]]
 		switch (verdict & NF_VERDICT_MASK) {
 		case NF_ACCEPT:
 			break;

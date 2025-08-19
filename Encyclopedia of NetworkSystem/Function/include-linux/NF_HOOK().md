@@ -17,9 +17,9 @@ NF_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk, struct 
 	struct net_device *in, struct net_device *out,
 	int (*okfn)(struct net *, struct sock *, struct sk_buff *))
 {
-	int ret = nf_hook(pf, hook, net, sk, skb, in, out, okfn);
+	int ret = nf_hook(pf, hook, net, sk, skb, in, out, okfn); // [[nf_hook()_]]]
 	if (ret == 1)
-		ret = okfn(net, sk, skb);
+		ret = okfn(net, sk, skb); // [[ip_rcv_finish()]]
 	return ret;
 }
 ```
@@ -38,8 +38,11 @@ NF_HOOK(uint8_t pf, unsigned int hook, struct net *net, struct sock *sk, struct 
 nf_hook() 함수를 실행하고 리턴값이 있으면 okfn() 함수를 실행한다.
 okfn은 call back function으로 ip_rcv_finish() 함수이다.
 
-넷필터 훅은 리눅스 네트워크 스택에서 패킷이 지나가는 여러 시점에 연결되어 네트워크 모듈이 패킷을 처리할 수 있게 하는 인터페이스이다. 이 훅을 통해 패킷이 들어올 때, 라우팅될 때, 나갈 때 등을 감지할 수 있으며, 이 시점에 패킷을 허용, 수정, 차단, 또는 다른 경로로 전송하는 등의 작업을 할 수 있다. 주로 방화벽, 패킷 필터링, NAT(Network Address Transition)에서 사용된다. 
-ip_rcv 과정에서 넷필터 훅을 거치는 이유는 패킷을 수신할 때, 방화벽 규칙, NAT(Network Address Transition), 패킷 필터링 등을 적용하기 위함이다. 
+---
+넷필터는 리눅스 네트워크 스택에서 패킷이 지나가는 여러 시점에 연결되어 네트워크 모듈이 hook point에서 패킷을 가로채 원하는 대로 처리할 수 있게 하는 인터페이스이다. 이 hook을 통해 패킷이 들어올 때, 라우팅될 때, 나갈 때 등을 감지할 수 있으며, 이 시점에 패킷을 허용, 수정, 차단, 또는 다른 경로로 전송하는 등의 작업을 할 수 있다. 주로 방화벽, 패킷 필터링, NAT(Network Address Transition)에서 사용된다. 
+ip_rcv 과정에서 넷필터 hook을 거치는 이유는 패킷을 수신할 때, 방화벽 규칙, NAT(Network Address Transition), 패킷 필터링 등을 적용하기 위함이다. 
+
+해당 프로토콜/훅 지점에 등록된 hook 함수 체인(hook_head)을 순차적으로 실행한 다음 패킷이 존재한다면 (drop 되지 않음) ip_rcv_finish로 연결된다.
 
 [[nf_hook()_]]
 [[ip_rcv_finish()]]

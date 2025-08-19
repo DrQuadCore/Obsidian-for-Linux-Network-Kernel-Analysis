@@ -30,7 +30,9 @@ Location: /net/core/dev.c
     		struct net_device *orig_dev = skb->dev;
     		struct packet_type *pt_prev = NULL;
     
-    		skb_list_del_init(skb);
+    		skb_list_del_init(skb); // 원래 list에서 제거 
+			// skb 하나씩 꺼내서 → L3 protocol에 맞는 handler 찾고자 호출
+			// packet type handler가 pt_prev에 저장됨
     		__netif_receive_skb_core(&skb, pfmemalloc, &pt_prev);
     		// [[Encyclopedia of NetworkSystem/Function/net-core/__netif_receive_skb_core().md|__netif_receive_skb_core()]]
     		if (!pt_prev)
@@ -54,3 +56,35 @@ Location: /net/core/dev.c
 [[Encyclopedia of NetworkSystem/Function/net-core/__netif_receive_skb_core().md|__netif_receive_skb_core()]]
 
 > head 리스트에 있는 각각의 skb 패킷을 순회하게 되고, 이를 처리하기 위해 `__netif_receive_skb_core()`함수를 호출하게 된다.
+
+---
+`__netif_receive_skb_list_core()`는 여러 skb를 모아 놓은 list를 받아서 같은 packet type, orig_dev인 skb만 sublist로 묶고 한 번에 dispatch 한다. 
+
+```c
+		list_for_each_entry_safe(skb, next, head, list) {
+    		struct net_device *orig_dev = skb->dev;
+    		struct packet_type *pt_prev = NULL;
+    
+    		skb_list_del_init(skb); // 원래 list에서 제거 
+    		__netif_receive_skb_core(&skb, pfmemalloc, &pt_prev); 
+    		// [[Encyclopedia of NetworkSystem/Function/net-core/__netif_receive_skb_core().md|__netif_receive_skb_core()]] 
+    		// packet type handler가 pt_prev에 저장됨
+    		
+    		if (!pt_prev)
+    			continue;
+
+			// packet type(pt_curr) 혹은 device(od_curr)이 바뀌었다면
+    		if (pt_curr != pt_prev || od_curr != orig_dev) { 
+    			/* dispatch old sublist */
+    			// 지금까지의 sublist 전달
+    			__netif_receive_skb_list_ptype(&sublist, pt_curr, od_curr);
+    			// 새로운 sublist 생성 후 pt_curr, od_curr을 지금 걸로 초기화
+    			INIT_LIST_HEAD(&sublist);
+    			pt_curr = pt_prev;
+    			od_curr = orig_dev;
+    		}
+    		// sublist에 추가 
+    		list_add_tail(&skb->list, &sublist);
+    	}
+```
+

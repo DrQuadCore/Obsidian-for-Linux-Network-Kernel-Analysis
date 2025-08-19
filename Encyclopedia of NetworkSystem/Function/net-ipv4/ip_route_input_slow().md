@@ -105,7 +105,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
         fl4.fl4_dport = 0;
     }
   
-    err = fib_lookup(net, &fl4, res, 0);
+    err = fib_lookup(net, &fl4, res, 0); // [[fib_lookup()]]
     if (err != 0) {
         if (!IN_DEV_FORWARD(in_dev))
             err = -EHOSTUNREACH;
@@ -138,7 +138,8 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
         goto martian_destination;
   
 make_route:
-    err = ip_mkroute_input(skb, res, in_dev, daddr, saddr, tos, flkeys);
+	// skb->dst 설정 (skb_dst_set(skb, &rth->dst);)
+    err = ip_mkroute_input(skb, res, in_dev, daddr, saddr, tos, flkeys) //[[ip_mkroute_input]]
 out:    return err;
   
 brd_input:
@@ -260,3 +261,119 @@ martian_source:
 
 
 [[fib_lookup()]]
+
+---
+```c
+    tun_info = skb_tunnel_info(skb);
+    if (tun_info && !(tun_info->mode & IP_TUNNEL_INFO_TX))
+        fl4.flowi4_tun_key.tun_id = tun_info->key.tun_id;
+    else
+        fl4.flowi4_tun_key.tun_id = 0;
+    skb_dst_drop(skb);
+```
+
+skb에 tun_info 가 존재하는지 확인한다. 즉, 이 패킷이 터널 처리와 관련이 있는지 확인한다. 만약 tun_info가 존재하고, IP_TUNNEL_INFO_TX flag가 꺼져 있으면 이 패킷의 터널 정보는 상대방이 캡슐화해서 보낸 것이므로 그 tun_id를 flowi4 구조체에 기록한다. 이후 기존 라우팅 캐시는 버린다. 
+
+flowi4 구조체는 아래와 같이 source address, destination address, type of service, protocol 등을 비롯하여 IPv4 라우팅 탐색에 필요한 필드로 구성돼 있다.
+
+```c
+struct flowi4 {
+	struct flowi_common	__fl_common;
+#define flowi4_oif		__fl_common.flowic_oif
+#define flowi4_iif		__fl_common.flowic_iif
+#define flowi4_l3mdev		__fl_common.flowic_l3mdev
+#define flowi4_mark		__fl_common.flowic_mark
+#define flowi4_tos		__fl_common.flowic_tos
+#define flowi4_scope		__fl_common.flowic_scope
+#define flowi4_proto		__fl_common.flowic_proto
+#define flowi4_flags		__fl_common.flowic_flags
+#define flowi4_secid		__fl_common.flowic_secid
+#define flowi4_tun_key		__fl_common.flowic_tun_key
+#define flowi4_uid		__fl_common.flowic_uid
+#define flowi4_multipath_hash	__fl_common.flowic_multipath_hash
+
+	/* (saddr,daddr) must be grouped, same order as in IP header */
+	__be32			saddr;
+	__be32			daddr;
+
+	union flowi_uli		uli;
+#define fl4_sport		uli.ports.sport
+#define fl4_dport		uli.ports.dport
+#define fl4_icmp_type		uli.icmpt.type
+#define fl4_icmp_code		uli.icmpt.code
+#define fl4_mh_type		uli.mht.type
+#define fl4_gre_key		uli.gre_key
+} __attribute__((__aligned__(BITS_PER_LONG/8)));
+```
+
+source address가 멀티캐스트 주소이거나 브로드캐스트 주소인지 판단한다. 참고로 이런 주소를 Martian address(= invalid and/or non-routable address)라고 부른다. 이럴 경우 packet을 drop 해 버린다. destination address가 브로드캐스트 주소이거나  src addr, dest addr 둘 다 0이면 모두 brd_input으로 가서 브로드캐스트 로직을 따른다.
+
+```c
+    res->fi = NULL;
+    res->table = NULL;
+    if (ipv4_is_lbcast(daddr) || (saddr == 0 && daddr == 0))
+        goto brd_input;
+```
+
+source address나 destination address가 0이면 martian packet으로 취급한다.
+
+```c
+    /* Accept zero addresses only to limited broadcast;
+     * I even do not know to fix it or not. Waiting for complains :-)
+     */
+    if (ipv4_is_zeronet(saddr))
+        goto martian_source;
+  
+    if (ipv4_is_zeronet(daddr))
+        goto martian_destination;
+```
+
+루프백 주소가 source address나 destination address에 올 경우, route_localnet 설정을 확인해서 값이 0이면 해당 패킷을 martian으로 버린다.
+
+```c
+    /* Following code try to avoid calling IN_DEV_NET_ROUTE_LOCALNET(),
+     * and call it once if daddr or/and saddr are loopback addresses
+     */
+    if (ipv4_is_loopback(daddr)) {
+        if (!IN_DEV_NET_ROUTE_LOCALNET(in_dev, net))
+            goto martian_destination;
+    } else if (ipv4_is_loopback(saddr)) {
+        if (!IN_DEV_NET_ROUTE_LOCALNET(in_dev, net))
+            goto martian_source;
+    }
+```
+
+정상적인 주소를 가진 패킷의 라우팅을 하기 전에 앞서 언급한 flowi4 struct인 fl4에 값을 설정한다. 
+
+```c
+	/*
+     *  Now we are ready to route packet.
+     */
+    fl4.flowi4_l3mdev = 0;
+    fl4.flowi4_oif = 0;
+    fl4.flowi4_iif = dev->ifindex;
+    fl4.flowi4_mark = skb->mark;
+    fl4.flowi4_tos = tos;
+    fl4.flowi4_scope = RT_SCOPE_UNIVERSE;
+    fl4.flowi4_flags = 0;
+    fl4.daddr = daddr;
+    fl4.saddr = saddr;
+    fl4.flowi4_uid = sock_net_uid(net, NULL);
+    
+    fl4.flowi4_multipath_hash = 0;
+       if (fib4_rules_early_flow_dissect(net, skb, &fl4, &_flkeys)) {
+        flkeys = &_flkeys;
+    } else {
+        fl4.flowi4_proto = 0;
+        fl4.fl4_sport = 0;
+        fl4.fl4_dport = 0;
+    }
+```
+
+fib_lookup() 함수는 IPv4 라우팅 테이블에서 함수의 인자로 주어진 flowi4 구조체 fl4를 key로 삼아서 해당 패킷이 어떤 route를 따라야 하는지를 찾고 그 결과를 res에 넣는다.
+
+```c
+    err = fib_lookup(net, &fl4, res, 0); // [[fib_lookup()]]
+```
+
+이후의 코드들은 res를 보고 packet의 destination type(res->type == RTN_BROADCAST, res->type == RTN_LOCA, res->type != RTN_UNICASTL)에 따라 분기 처리(goto brd_input, goto local_input, goto no_route, goto martian_destination)를 한다. 

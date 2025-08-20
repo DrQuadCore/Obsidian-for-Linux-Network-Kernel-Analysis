@@ -134,7 +134,7 @@ struct ice_rx_buf {
 	- 타입이 포인터인 것을 알 수 있습니다.
 
 
-### 상황 1 - NIC으로부터 인터럽트 발생
+## 상황 1 - NIC으로부터 인터럽트 발생
 - NIC에 의해 인터럽트가 발생 시, ice_q_vector에 있는 napi_struct의 poll_list가 지금 실행 중인 코어의 softnet_data의 poll_list로 옮겨갑니다.
 	- ice_msix_clean_rings(), napi_schedule() 함수 등에 의해서 옮겨갑니다.
 
@@ -189,7 +189,7 @@ static inline void list_add_tail(struct list_head *new, struct list_head *head)
 - call flow에 따른 각 함수들의 일부분입니다.
 - q_vector의 napi_struct 매개변수로 넘겨지면서, 최종적으로 현재 인터럽트를 처리하고 있는 코어의 softnet_data의 poll_list로 napi_struct의 poll_list가 넘어가는 것을 볼 수 있습니다. 
 
-### 상황 2 - 백로그로 skb 넘기기
+## 상황 2 - 백로그로 skb 넘기기
 - RPS를 통해 skb를 특정 코어의 백로그로 넘기고자 합니다다.
 
 ```c

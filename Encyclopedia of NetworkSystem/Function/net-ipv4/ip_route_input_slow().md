@@ -47,7 +47,7 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
      * by fib_lookup.
      */
   
-    tun_info = skb_tunnel_info(skb);
+    tun_info = skb_tunnel_info(skb); 
     if (tun_info && !(tun_info->mode & IP_TUNNEL_INFO_TX))
         fl4.flowi4_tun_key.tun_id = tun_info->key.tun_id;
     else
@@ -138,7 +138,6 @@ static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
         goto martian_destination;
   
 make_route:
-	// skb->dst 설정 (skb_dst_set(skb, &rth->dst);)
     err = ip_mkroute_input(skb, res, in_dev, daddr, saddr, tos, flkeys) //[[ip_mkroute_input]]
 out:    return err;
   
@@ -157,16 +156,16 @@ brd_input:
     RT_CACHE_STAT_INC(in_brd);
   
 local_input:
-    if (IN_DEV_ORCONF(in_dev, NOPOLICY))
+    if (IN_DEV_ORCONF(in_dev, NOPOLICY)) 
         IPCB(skb)->flags |= IPSKB_NOPOLICY;
   
-    do_cache &= res->fi && !itag;
+    do_cache &= res->fi && !itag; 
     if (do_cache) {
         struct fib_nh_common *nhc = FIB_RES_NHC(*res);
-  
+
         rth = rcu_dereference(nhc->nhc_rth_input);
-        if (rt_cache_valid(rth)) {
-            skb_dst_set_noref(skb, &rth->dst);
+        if (rt_cache_valid(rth)) { 
+            skb_dst_set_noref(skb, &rth->dst); // [[skb_dst_set_noref()]]
             err = 0;
             goto out;
         }
@@ -264,17 +263,28 @@ martian_source:
 
 ---
 ```c
-    tun_info = skb_tunnel_info(skb);
-    if (tun_info && !(tun_info->mode & IP_TUNNEL_INFO_TX))
-        fl4.flowi4_tun_key.tun_id = tun_info->key.tun_id;
-    else
-        fl4.flowi4_tun_key.tun_id = 0;
-    skb_dst_drop(skb);
+static int ip_route_input_slow(struct sk_buff *skb, __be32 daddr, __be32 saddr,
+                   u8 tos, struct net_device *dev,
+                   struct fib_result *res)
+{
+    struct in_device *in_dev = __in_dev_get_rcu(dev);
+    struct flow_keys *flkeys = NULL, _flkeys;
+    struct net    *net = dev_net(dev);
+    struct ip_tunnel_info *tun_info;
+    int     err = -EINVAL;
+    unsigned int    flags = 0;
+    u32     itag = 0;
+    struct rtable   *rth;
+    struct flowi4   fl4;
+    bool do_cache = true;
+  
+    /* IP on this device is disabled. */
+  
+    if (!in_dev)
+        goto out;
 ```
 
-skb에 tun_info 가 존재하는지 확인한다. 즉, 이 패킷이 터널 처리와 관련이 있는지 확인한다. 만약 tun_info가 존재하고, IP_TUNNEL_INFO_TX flag가 꺼져 있으면 이 패킷의 터널 정보는 상대방이 캡슐화해서 보낸 것이므로 그 tun_id를 flowi4 구조체에 기록한다. 이후 기존 라우팅 캐시는 버린다. 
-
-flowi4 구조체는 아래와 같이 source address, destination address, type of service, protocol 등을 비롯하여 IPv4 라우팅 탐색에 필요한 필드로 구성돼 있다.
+`flowi4` 라는 구조체가 등장한다. 
 
 ```c
 struct flowi4 {
@@ -306,7 +316,29 @@ struct flowi4 {
 } __attribute__((__aligned__(BITS_PER_LONG/8)));
 ```
 
-source address가 멀티캐스트 주소이거나 브로드캐스트 주소인지 판단한다. 참고로 이런 주소를 Martian address(= invalid and/or non-routable address)라고 부른다. 이럴 경우 packet을 drop 해 버린다. destination address가 브로드캐스트 주소이거나  src addr, dest addr 둘 다 0이면 모두 brd_input으로 가서 브로드캐스트 로직을 따른다.
+flowi4 구조체는 위와 같이 source address, destination address, protocol 등을 비롯하여 IPv4 라우팅 탐색에 필요한 필드로 구성돼 있다. 이후 라우팅 테이블을 lookup할 때 key 값으로 쓰인다.
+
+```c
+     /* Check for the most weird martians, which can be not detected
+     * by fib_lookup.
+     */
+    
+    tun_info = skb_tunnel_info(skb); 
+    if (tun_info && !(tun_info->mode & IP_TUNNEL_INFO_TX))
+        fl4.flowi4_tun_key.tun_id = tun_info->key.tun_id;
+    else
+        fl4.flowi4_tun_key.tun_id = 0;
+    skb_dst_drop(skb);
+```
+
+skb에 터널 관련 metatdata(strcuct ip_tunnel_info)가 존재하는지 확인한다. 만약 tun_info가 존재하고, '수신'된 터널 패킷이라면 tun_id를 flowi4 구조체에 기록한다.
+
+```c
+    if (ipv4_is_multicast(saddr) || ipv4_is_lbcast(saddr))
+        goto martian_source;
+```
+
+source address가 멀티캐스트 주소이거나 브로드캐스트 주소인지 판단한다. 참고로 이런 주소를 Martian address(= invalid and/or non-routable address)라고 부른다. 이럴 경우 packet을 drop 해 버린다. 
 
 ```c
     res->fi = NULL;
@@ -315,7 +347,7 @@ source address가 멀티캐스트 주소이거나 브로드캐스트 주소인�
         goto brd_input;
 ```
 
-source address나 destination address가 0이면 martian packet으로 취급한다.
+destination address가 limited broadcast 주소이거나 src addr, dest addr 둘 다 0이면 모두 brd_input으로 가서 브로드캐스트 로직을 따른다.
 
 ```c
     /* Accept zero addresses only to limited broadcast;
@@ -328,7 +360,7 @@ source address나 destination address가 0이면 martian packet으로 취급한�
         goto martian_destination;
 ```
 
-루프백 주소가 source address나 destination address에 올 경우, route_localnet 설정을 확인해서 값이 0이면 해당 패킷을 martian으로 버린다.
+source address나 destination address가 0이면 martian packet으로 취급한다.
 
 ```c
     /* Following code try to avoid calling IN_DEV_NET_ROUTE_LOCALNET(),
@@ -343,21 +375,22 @@ source address나 destination address가 0이면 martian packet으로 취급한�
     }
 ```
 
-정상적인 주소를 가진 패킷의 라우팅을 하기 전에 앞서 언급한 flowi4 struct인 fl4에 값을 설정한다. 
+source address나 destination address가 loopback 주소일 경우, IN_DEV_NET_ROUTE_LOCALNET을 확인해서 꺼져 있으면 해당 패킷을 martian으로 버린다.
+(이게 켜져 있으면 loopback 주소를 네트워크 인터페이스로 들어오거나 나가는 패킷에 허용한다는 의미)
 
 ```c
 	/*
      *  Now we are ready to route packet.
      */
     fl4.flowi4_l3mdev = 0;
-    fl4.flowi4_oif = 0;
-    fl4.flowi4_iif = dev->ifindex;
+    fl4.flowi4_oif = 0; // output interface
+    fl4.flowi4_iif = dev->ifindex; // input interface
     fl4.flowi4_mark = skb->mark;
-    fl4.flowi4_tos = tos;
+    fl4.flowi4_tos = tos; // type of service
     fl4.flowi4_scope = RT_SCOPE_UNIVERSE;
     fl4.flowi4_flags = 0;
-    fl4.daddr = daddr;
-    fl4.saddr = saddr;
+    fl4.daddr = daddr; // destination address
+    fl4.saddr = saddr; // source address
     fl4.flowi4_uid = sock_net_uid(net, NULL);
     
     fl4.flowi4_multipath_hash = 0;
@@ -370,10 +403,31 @@ source address나 destination address가 0이면 martian packet으로 취급한�
     }
 ```
 
-fib_lookup() 함수는 IPv4 라우팅 테이블에서 함수의 인자로 주어진 flowi4 구조체 fl4를 key로 삼아서 해당 패킷이 어떤 route를 따라야 하는지를 찾고 그 결과를 res에 넣는다.
+패킷의 라우팅을 하기 전에 앞서 언급한 flowi4 struct인 fl4에 값을 설정한다. 
 
 ```c
     err = fib_lookup(net, &fl4, res, 0); // [[fib_lookup()]]
 ```
 
+fib_lookup() 함수는 IPv4 라우팅 테이블에서 함수의 인자로 주어진 flowi4 구조체 fl4를 key로 삼아서 해당 패킷이 어떤 route를 따라야 하는지를 찾고 그 결과를 res에 넣는다.
+
 이후의 코드들은 res를 보고 packet의 destination type(res->type == RTN_BROADCAST, res->type == RTN_LOCA, res->type != RTN_UNICASTL)에 따라 분기 처리(goto brd_input, goto local_input, goto no_route, goto martian_destination)를 한다. 
+
+```c
+local_input:
+    if (IN_DEV_ORCONF(in_dev, NOPOLICY))
+  
+    do_cache &= res->fi && !itag; // 라우팅 엔트리를 찾았을 경우,
+    if (do_cache) {
+		// nexthop 정보 꺼내와서
+        struct fib_nh_common *nhc = FIB_RES_NHC(*res);
+  
+		// fib lookup 결과 얻은 nexthop에 대해 incoming 패킷용 라우트 캐시 확인
+        rth = rcu_dereference(nhc->nhc_rth_input);
+        if (rt_cache_valid(rth)) { // 캐시가 아직 유효하다면 새로 라우팅 계산 X
+            skb_dst_set_noref(skb, &rth->dst); // [[skb_dst_set_noref()]]
+            err = 0;
+            goto out;
+        }
+    }
+```

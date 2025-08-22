@@ -26,7 +26,7 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 		if (unlikely(err))
 			goto drop_error;
 	}
-	// IP 계층에서 early demux가 가능한지 확인 
+	// IP 레벨에서 소켓 lookup이 가능한지 확인
 	if (READ_ONCE(net->ipv4.sysctl_ip_early_demux) &&
 		!skb_dst(skb) &&
 		!skb->sk &&
@@ -40,7 +40,7 @@ static int ip_rcv_finish_core(struct net *net, struct sock *sk,
 				iph = ip_hdr(skb);
 			}
 			break;
-		case IPPROTO_UDP: // udp protocol에 대해 early demux가 가능한지 확인
+		case IPPROTO_UDP: // UDP 패킷에 대해 미리 소켓 lookup이 가능한지 확인
 			if (READ_ONCE(net->ipv4.sysctl_udp_early_demux)) {
 				err = udp_v4_early_demux(skb);
 				if (unlikely(err))
@@ -138,4 +138,3 @@ drop_error:
 [[tcp_v4_early_demux()]]
 [[ip_route_input_noref()]]
 
----

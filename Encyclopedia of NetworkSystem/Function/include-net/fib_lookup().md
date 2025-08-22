@@ -44,12 +44,12 @@ fib_result 구조체 세팅은 table을 탐색하며 이루어진다. fib_result
 struct fib_result {
 	__be32			prefix;
 	unsigned char		prefixlen;
-	unsigned char		nh_sel; // 다음 홉 개수
-	unsigned char		type; // 패킷 처리 방식
-	unsigned char		scope;
+	unsigned char		nh_sel; 
+	unsigned char		type; // 패킷 처리 방식 (포워딩 or 로컬 전달 or 폐기)
+	unsigned char		scope; 
 	u32			tclassid;
-	struct fib_nh_common	*nhc;
-	struct fib_info		*fi;
+	struct fib_nh_common	*nhc; // 이번 lookup에서 선택된 nexthop 
+	struct fib_info		*fi; // 라우팅 테이블의 엔트리 
 	struct fib_table	*table; // fib table을 가리키는 포인터
 	struct hlist_head	*fa_head;
 };

@@ -7,7 +7,7 @@
 ## 결론
 - ice_q_vector는 tx/rx queue pair 당 1개씩 존재합니다.
 	- tx/rx queue가 ***보통 코어 당 1개씩*** 존재하므로 ice_q_vector도 코어 당 1개씩 존재하게 됩니다.
-	- 즉, ***일반적으로*** napi_struct도 rx queue(코어) 당 1개씩 존재하게 됩니다.
+	- 즉, ***일반적으로*** napi_struct도 rx queue 당 1개씩 존재하게 됩니다.
 - softnet_data는 ***코어 당 1개씩 존재***합니다.
 ---
 - 일반적으로 생각하는 패킷 하나는 sk_buff 즉, skb입니다.

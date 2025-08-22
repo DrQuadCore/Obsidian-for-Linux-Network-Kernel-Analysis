@@ -265,9 +265,6 @@ config INET
 ---
 **결론**: sk_buff 구조체 타입의 매개변수 skb에는 사전에 만들어지는 dst_entry 구조체가 저장된 메모리 주소가 `skb_refdst` 변수의 특정 비트에 저장되어 있고, 이를 `skb_dst()`함수로 들고 오고, 이 dst_entry 구조체 내부에 input 함수 포인터가 있고 ip4인지 ip6인지에 따라 두 함수 `ip_local_deliver()` 또는 `ip6_input()`함수의 주소가 저장되어 있다. `INDIRECT_CALLABLE_DECLARE` 매크로 함수에서는 `input`에 저장된 함수를 실행한다.
 
-**왜 이중 구조로 확인할까?** 
-결론적으로 dst_input() 함수는 INDIRECT_CALLABLE_DECLARE 함수 매크로를 통해서 ipv4인지 ipv6인지에 따라 함수를 선택하고, 둘 다 아닌 경우에는 dst_entry의 멤버변수 input 함수 포인터에 저장된 함수를 실행함. 일반적인 경우 input 내에도 ipv4, ipv6인지에 따라 두 함수 ip6_input, ip_local_deliver 중 하나의 주소가 저장되었겠지만 추후 다른 함수를 저장하여 dst_input()의 결과로 실행되는 함수를 쉽게 바꿀 수 있게 하기 위함으로 보임
-
 ---
 ## 3. ip_local_deliever
 ```c title=ip_local_deliver코드

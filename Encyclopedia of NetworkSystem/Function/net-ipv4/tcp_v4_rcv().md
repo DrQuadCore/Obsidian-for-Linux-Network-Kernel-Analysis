@@ -339,7 +339,7 @@ pskb_may_pull() 함수가 tcp header option 이 sk_buff의 kmalloc된 부분에 
 TCP_listen 상태에서는 syn pkt을 기다리고 있기 때문에 위의 과정이 불필요하다.
 syn pkt에는 payload가 없어서 lock이 걸릴 일이 없기 때문이다. 
 
-[[Encyclopedia of NetworkSystem/Function/net-ipv4/`__inet_lookup_skb()]]
+[[__inet_lookup_skb()]]
 [[tcp_filter()]]
 [[tcp_check_req()]]
 [[Encyclopedia of NetworkSystem/Function/net-ipv4/tcp_v4_do_rcv()|tcp_v4_do_rcv()]]

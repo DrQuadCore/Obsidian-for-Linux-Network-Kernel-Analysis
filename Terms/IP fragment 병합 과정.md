@@ -6,6 +6,8 @@
 ### net_device
 네트워크 인터페이스를 표현함. MAC 주소 등 가짐
 
+### net
+네트워크 네임스페이스. 별개의 네트워크 공간처럼 작동하게 하는 역할. 네트워크 장치, 프로토콜 상태, 설정 등 저장
 ### dst_entry
 네트워크 패킷이 전달될 목적지의 네트워크 인터페이스, 사용할 함수 등 저장
 
@@ -13,7 +15,10 @@
 fragment를 합치기 위해 모아놓은 큐
 
 ### ipq
-아직 다 오지 않은 데이터그램의 큐.  inet_frag_queue, 최대로 fragment할 수 있는 크기 등 저장
+아직 다 오지 않은 데이터그램 단위의 큐.  inet_frag_queue를 포함하여 최대로 fragment할 수 있는 크기 등 상태도 저장하는 상위 구조체
+
+### fqdir
+
 
 
 
@@ -51,8 +56,8 @@ ACK 패킷이면 `tcp_ack()`로 처리
 기존의 가장 마지막 패킷과 합칠 수 있으면 합침(`tcp_try_coalesce()`)
 소켓 수신 큐에 넣음(`__skb_queue_tail()`)
 ### 10.1. `tcp_data_queue()`
-시퀀스가 맞으면 정상 처리(``tcp_queue_rcv()`)
-시퀀스가 안 맞으면 rbtree에 넣어 관리(``tcp_data_queue_ofo()`)
+시퀀스가 맞으면 정상 처리(`tcp_queue_rcv()`)
+시퀀스가 안 맞으면 rbtree에 넣어 관리(`tcp_data_queue_ofo()`)
 
 ---
 ### 6.2. `tcp_add_backlog()`
@@ -235,32 +240,8 @@ struct dst_entry {
 #endif
 ```
 IPv6이라면 (`CONFIG_IPV6`가 정의되어 있다면) f2 함수(`ip6_input()`)를 실행한다.
-아니고 만약에 CONFIG_INET이  true라면 f1함수(`ip_local_deliver()`)를 실행한다.
+아니고 만약에 `CONFIG_INET`이  true라면 f1함수(`ip_local_deliver()`)를 실행한다.
 둘 다 아니면 f 함수(`input`)를 실행한다.
-CONFIG_INET은 `net/Kconfig` 파일 내에 있고, IPv4를 사용할 수 있으면 true로 저장하는 것으로 보인다.
-```
-config INET
-	bool "TCP/IP networking"
-	help
-	  These are the protocols used on the Internet and on most local
-	  Ethernets. It is highly recommended to say Y here (this will enlarge
-	  your kernel by about 400 KB), since some programs (e.g. the X window
-	  system) use TCP/IP even if your machine is not connected to any
-	  other computer. You will get the so-called loopback device which
-	  allows you to ping yourself (great fun, that!).
-
-	  For an excellent introduction to Linux networking, please read the
-	  Linux Networking HOWTO, available from
-	  <http://www.tldp.org/docs.html#howto>.
-
-	  If you say Y here and also to "/proc file system support" and
-	  "Sysctl support" below, you can change various aspects of the
-	  behavior of the TCP/IP code by writing to the (virtual) files in
-	  /proc/sys/net/ipv4/*; the options are explained in the file
-	  <file:Documentation/networking/ip-sysctl.rst>.
-
-	  Short answer: say Y.
-```
 
 ---
 **결론**: sk_buff 구조체 타입의 매개변수 skb에는 사전에 만들어지는 dst_entry 구조체가 저장된 메모리 주소가 `skb_refdst` 변수의 특정 비트에 저장되어 있고, 이를 `skb_dst()`함수로 들고 오고, 이 dst_entry 구조체 내부에 input 함수 포인터가 있고 ip4인지 ip6인지에 따라 두 함수 `ip_local_deliver()` 또는 `ip6_input()`함수의 주소가 저장되어 있다. `INDIRECT_CALLABLE_DECLARE` 매크로 함수에서는 `input`에 저장된 함수를 실행한다.
@@ -335,6 +316,10 @@ skb(`sk_buff`)->dev(`net_device`)->nd_net(`possible_net_t`)->net(`net`)을 RCU �
 ### 3.2. ip_hdr(), ip_is_fragment()
 ```c
 // include/net/ip.h
+/* IP flags. */
+#define IP_MF		0x2000		/* Flag: "More Fragments"	*/
+#define IP_OFFSET	0x1FFF		/* "Fragment Offset" part	*/
+
 static inline struct iphdr *ip_hdr(const struct sk_buff *skb)
 {
 	return (struct iphdr *)skb_network_header(skb);
@@ -345,6 +330,10 @@ static inline bool ip_is_fragment(const struct iphdr *iph)
 	return (iph->frag_off & htons(IP_MF | IP_OFFSET)) != 0;
 }
 ```
+`htons()`: host to network short. 빅 엔디안(상위 바이트를 메모리 앞에 저장) 방식으로 변환하는 함수
+`iph->frag_off & IP_MF`: 1이면 이후에도 fragment가 더 온다는 뜻. 0이면 해당 패킷의 마지막 fragment라는 뜻
+`iph->frag_off & IP_OFFSET`: 기존 데이터그램 내에서 fragment의 시작 위치
+**결론**: 뒤에 fragment가 더 오거나, fragment의 시작 위치가 0이 아니어야 fragment이다.
 
 ```c
 // include/linux/sk_buff.h
@@ -460,6 +449,11 @@ L3계층(네트워크 레이어)에서 네트워크 인터페이스들은 논리
 상위 인터페이스를 마스터, 하위 인터페이스를 슬레이브로 지칭함
 ```c
 // include/linux/netdevice.h
+/*
+ *	@priv_flags:	Like 'flags' but invisible to userspace, 
+ *			        see if.h for the definitions
+ */
+
 static inline bool netif_is_l3_master(const struct net_device *dev)
 {
 	return dev->priv_flags & IFF_L3MDEV_MASTER;
@@ -469,6 +463,7 @@ static inline bool netif_is_l3_slave(const struct net_device *dev)
 	return dev->priv_flags & IFF_L3MDEV_SLAVE;
 }
 ```
+priv_flags: 네트워크 장치가 L3 마스터인지, 슬레이브인지, 특정 프로토콜 지원 여부 등 저장
 
 ```c
 // net/core/dev.c
@@ -954,6 +949,7 @@ struct sk_buff {
 	 * @fragments_tail: received fragments tail
 	 */
 	prev_tail = qp->q.fragments_tail;
+	// iqp에 새로운 fragment 삽입하기
 	err = inet_frag_queue_insert(&qp->q, skb, offset, end);
 	if (err)
 		goto insert_error;

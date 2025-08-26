@@ -16,7 +16,7 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	bool refcounted;
 	struct sock *sk;
 	int ret;
-	// a.
+	// a.패킷 상태 확인 후 소켓 들고 오기
 	drop_reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	if (skb->pkt_type != PACKET_HOST)
 		goto discard_it;
@@ -52,6 +52,7 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	iph = ip_hdr(skb);
 lookup:
 	// sock 들고 오기
+	// [[__inet_lookup_skb()]]
 	sk = __inet_lookup_skb(net->ipv4.tcp_death_row.hashinfo,
 					skb, __tcp_hdrlen(th), th->source,
 					th->dest, sdif, &refcounted);
@@ -59,7 +60,7 @@ lookup:
 		goto no_tcp_socket;
   
 process:
-	// b.
+	// b. 소켓 상태 확인 후 TIME_WAIT, NEW_SYN_RECV 분기
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;
 	  
@@ -68,7 +69,7 @@ process:
 		bool req_stolen = false;
 		struct sock *nsk;
 		
-		// c.
+		// c.3-way handshake 보안 정책 및 해시 검사
 		// (struct request_sock *)->(struct sock_common).(sock)
 		sk = req->rsk_listener;
 		// IPSec 보안정책 위반 확인
@@ -83,7 +84,7 @@ process:
 			reqsk_put(req);
 			goto discard_it;
 		}
-		// d.
+		// d.체크섬 검사 후 migrate
 		// checksum 검사
 		if (tcp_checksum_complete(skb)) {
 			reqsk_put(req);
@@ -106,7 +107,7 @@ process:
 			sock_hold(sk);
 		}
 		
-		// e.
+		// e.소켓 필터 검사 후 새로 연결 시도
 		refcounted = true;
 		nsk = NULL;
 		if (!tcp_filter(sk, skb)) {
@@ -117,7 +118,7 @@ process:
 		} else {
 			drop_reason = SKB_DROP_REASON_SOCKET_FILTER;
 		}
-		// f.
+		// f. 자식 소켓 생성 실패 시 재탐색
 		if (!nsk) {
 			reqsk_put(req);
 			if (req_stolen) {
@@ -132,7 +133,7 @@ process:
 			}
 			goto discard_and_relse;
 		}
-		// g.
+		// g. 연결 후
 		nf_reset_ct(skb);
 		if (nsk == sk) {
 			reqsk_put(req);
@@ -149,7 +150,7 @@ process:
 		}
 	}
 	
-	// i.
+	// i. 신규 소켓이 아닌 일반 패킷 처리
 	if (static_branch_unlikely(&ip4_min_ttl)) {
 		/* min_ttl can be changed concurrently from do_ip_setsockopt() */
 		if (unlikely(iph->ttl < READ_ONCE(inet_sk(sk)->min_ttl))) {
@@ -181,12 +182,11 @@ process:
 	  
 	skb->dev = NULL;
 	
-	// j.
+	// j. LISTEN 상태에서 연결 처리
 	if (sk->sk_state == TCP_LISTEN) {
 		ret = tcp_v4_do_rcv(sk, skb);
 		goto put_and_return;
-	}
-	// k.  
+	}  
 	sk_incoming_cpu_update(sk);
 	  
 	bh_lock_sock_nested(sk);
@@ -199,7 +199,7 @@ process:
 			goto discard_and_relse;
 	}
 	bh_unlock_sock(sk);
-// l.	  
+// k.	  
 put_and_return:
 	if (refcounted)
 		sock_put(sk);
@@ -236,7 +236,7 @@ discard_and_relse:
 		sock_put(sk);
 	goto discard_it;
 
-// n.  
+// l.  
 do_time_wait:
 	if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
 		drop_reason = SKB_DROP_REASON_XFRM_POLICY;
@@ -313,11 +313,11 @@ do_time_wait:
 
 > **j.** 그게 아니라면 `sk_incoming_cpu_update()`를 실행하여 현재 패킷을 처리하는 코어가 어느 것인지 업데이트 후 user context에서 사용 중인지를 확인하고 사용하지 않는다면 `tcp_v4_do_rcv()`함수를 실행하게 된다. 만약 사용중이라면 `tcp_add_backlog()`함수를 실행하게 된다.
 
->**l.** `put_and_return`라벨은 보통의 정상적인 수신이 되었을 때 나타나는 루틴이며, 여기서도 `sock_out()`함수를 실행하고 `ret`을 리턴한다.
+>**k.** `put_and_return`라벨은 보통의 정상적인 수신이 되었을 때 나타나는 루틴이며, 여기서도 `sock_out()`함수를 실행하고 `ret`을 리턴한다.
 
->**n.** `do_time_wait:`라벨은 `tcp_v4_rcv()`함수 맨 위쪽에 만약 `sk->state`가 `TCP_TIME_WAIT`인 경우에 넘어오게 되는 부분이다. `tcp_timewait_state_process()`이 함수를 통해 잠시 기다렸다가, 결과에 따라서 switch문으로 분기하게 된다.
+>**l.** `do_time_wait:`라벨은 `tcp_v4_rcv()`함수 맨 위쪽에 만약 `sk->state`가 `TCP_TIME_WAIT`인 경우에 넘어오게 되는 부분이다. `tcp_timewait_state_process()`이 함수를 통해 잠시 기다렸다가, 결과에 따라서 switch문으로 분기하게 된다.
 >
->먼저 `TCP_TW_SYN`의 경우 해당하는 소켓을 새로 찾아서 바꿔주고 `process:`라벨로 다시 돌아가게 된다. ACK나 RST같은 경우에도 해당하는 함수를 실행해주고(`tcp_v4_timewait_ack()`, `tcp_v4_send_rest()` 등등) 만약 `TCP_TW_SUCCESS` 라면 아무것도 안하게 된다.
+>**n.** 먼저 `TCP_TW_SYN`의 경우 해당하는 소켓을 새로 찾아서 바꿔주고 `process:`라벨로 다시 돌아가게 된다. ACK나 RST같은 경우에도 해당하는 함수를 실행해주고(`tcp_v4_timewait_ack()`, `tcp_v4_send_rest()` 등등) 만약 `TCP_TW_SUCCESS` 라면 아무것도 안하게 된다.
 
 ---
 packet의 type이 PACKET_HOST인 경우에만 진행한다.

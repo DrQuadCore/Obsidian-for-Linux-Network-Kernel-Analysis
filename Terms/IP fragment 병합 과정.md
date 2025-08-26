@@ -971,7 +971,7 @@ struct sk_buff {
 ```
 
 
-```c
+```c title=inet_frag_queue_insert()
 int inet_frag_queue_insert(struct inet_frag_queue *q, struct sk_buff *skb,
 			   int offset, int end)
 {
@@ -1111,6 +1111,84 @@ if (qp->q.flags == (INET_FRAG_FIRST_IN | INET_FRAG_LAST_IN) &&
 - 첫번째와 마지막 fragment가 도작했고, 수신받은 fragment 데이터 길이(`qp->q.meat`)가 전체 데이터 길이(`qp->q.len`)와 일치한다면
 	- 모든 fragment들을 합침(`ip_frag_reasm()`) 합치는 도중에는 `_skb_refdsk` 변수를 `(unsigned long)0`으로 바꿈
 	- 오류 발생 시 해당 fragment 큐를 삭제
+
+```c title=ip_frag_reasm()
+
+/* Build a new IP datagram from all its fragments. */
+static int ip_frag_reasm(struct ipq *qp, struct sk_buff *skb,
+			 struct sk_buff *prev_tail, struct net_device *dev)
+{
+	struct net *net = qp->q.fqdir->net;
+	struct iphdr *iph;
+	void *reasm_data;
+	int len, err;
+	u8 ecn;
+	
+	// ipq가 필요없으니 제거
+	ipq_kill(qp);
+	
+	// ECN(Explicit Congestion Notification) 
+	ecn = ip_frag_ecn_table[qp->ecn];
+	if (unlikely(ecn == 0xff)) {
+		err = -EINVAL;
+		goto out_fail;
+	}
+
+	/* Make the one we just received the head. */
+	reasm_data = inet_frag_reasm_prepare(&qp->q, skb, prev_tail);
+	if (!reasm_data)
+		goto out_nomem;
+
+	// 전체 재조립된 데이터그램의 길이 계산
+	len = ip_hdrlen(skb) + qp->q.len;
+	err = -E2BIG;
+	if (len > 65535)
+		goto out_oversize;
+
+	inet_frag_reasm_finish(&qp->q, skb, reasm_data,
+			       ip_frag_coalesce_ok(qp));
+
+	skb->dev = dev;
+	IPCB(skb)->frag_max_size = max(qp->max_df_size, qp->q.max_size);
+
+	iph = ip_hdr(skb);
+	iph->tot_len = htons(len);
+	iph->tos |= ecn;
+
+	/* When we set IP_DF on a refragmented skb we must also force a
+	 * call to ip_fragment to avoid forwarding a DF-skb of size s while
+	 * original sender only sent fragments of size f (where f < s).
+	 *
+	 * We only set DF/IPSKB_FRAG_PMTU if such DF fragment was the largest
+	 * frag seen to avoid sending tiny DF-fragments in case skb was built
+	 * from one very small df-fragment and one large non-df frag.
+	 */
+	if (qp->max_df_size == qp->q.max_size) {
+		IPCB(skb)->flags |= IPSKB_FRAG_PMTU;
+		iph->frag_off = htons(IP_DF);
+	} else {
+		iph->frag_off = 0;
+	}
+
+	ip_send_check(iph);
+
+	__IP_INC_STATS(net, IPSTATS_MIB_REASMOKS);
+	qp->q.rb_fragments = RB_ROOT;
+	qp->q.fragments_tail = NULL;
+	qp->q.last_run_head = NULL;
+	return 0;
+
+out_nomem:
+	net_dbg_ratelimited("queue_glue: no memory for gluing queue %p\n", qp);
+	err = -ENOMEM;
+	goto out_fail;
+out_oversize:
+	net_info_ratelimited("Oversized IP packet from %pI4\n", &qp->q.key.v4.saddr);
+out_fail:
+	__IP_INC_STATS(net, IPSTATS_MIB_REASMFAILS);
+	return err;
+}
+```
 ---
 **g. 재조립되지 않은 경우**
 ```c

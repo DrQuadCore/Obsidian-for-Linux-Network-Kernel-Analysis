@@ -32,6 +32,7 @@ Location: /net/ipv4/tcp_input.c
 */
 void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 {
+	// a. 변수 초기화
 	enum skb_drop_reason reason = SKB_DROP_REASON_NOT_SPECIFIED;
 	const struct tcphdr *th = (const struct tcphdr *)skb->data;
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -43,6 +44,8 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 	tcp_mstamp_refresh(tp);
 	if (unlikely(!rcu_access_pointer(sk->sk_rx_dst)))
 		inet_csk(sk)->icsk_af_ops->sk_rx_dst_set(sk, skb);
+	
+	// b. 빠른 경로 확인
 	/*
 	* Header prediction.
 	* The code loosely follows the one in the famous
@@ -57,7 +60,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 	* extra cost of the net_bh soft interrupt processing...
 	* We do checksum and copy also but from device to kernel.
 	*/
-	  
+	
 	tp->rx_opt.saw_tstamp = 0;
 	  
 	/* pred_flags is 0xS?10 << 16 + snd_wnd
@@ -68,7 +71,6 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 	* space for instance)
 	* PSH flag is ignored.
 	*/
-	  
 	if ((tcp_flag_word(th) & TCP_HP_BITS) == tp->pred_flags &&
 		TCP_SKB_CB(skb)->seq == tp->rcv_nxt &&
 		!after(TCP_SKB_CB(skb)->ack_seq, tp->snd_nxt)) {
@@ -79,12 +81,14 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 		* match.
 		*/
 		  
+		// 타임스탬프 검사
 		/* Check timestamp */
 		if (tcp_header_len == sizeof(struct tcphdr) + TCPOLEN_TSTAMP_ALIGNED) {
 			/* No? Slow path! */
 			if (!tcp_parse_aligned_timestamp(tp, th))
 			goto slow_path;
 			  
+			// PAWS(Protect Against Wrapped Sequences) 검사
 			/* If PAWS failed, check it more carefully in slow path */
 			if ((s32)(tp->rx_opt.rcv_tsval - tp->rx_opt.ts_recent) < 0)
 			goto slow_path;
@@ -95,7 +99,8 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 			* future packets due to the PAWS test.
 			*/
 		}
-	  
+		
+		// c. 빠른 경로 ACK 처리
 		if (len <= tcp_header_len) {
 		/* Bulk data transfer: sender */
 			if (len == tcp_header_len) {
@@ -111,7 +116,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 				/* We know that such packets are checksummed
 				* on entry.
 				*/
-				tcp_ack(sk, skb, 0);
+				tcp_ack(sk, skb, 0);        // [[tcp_ack()]]
 				__kfree_skb(skb);
 				tcp_data_snd_check(sk);
 				/* When receiving pure ack in fast path, update
@@ -125,6 +130,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 				TCP_INC_STATS(sock_net(sk), TCP_MIB_INERRS);
 				goto discard;
 			}
+		// d. 빠른 경로 데이터 수신 처리
 		} else {
 			int eaten = 0;
 			bool fragstolen = false;
@@ -151,7 +157,7 @@ void tcp_rcv_established(struct sock *sk, struct sk_buff *skb)
 			/* Bulk data transfer: receiver */
 			skb_dst_drop(skb);
 			__skb_pull(skb, tcp_header_len);
-			eaten = tcp_queue_rcv(sk, skb, &fragstolen);
+			eaten = tcp_queue_rcv(sk, skb, &fragstolen); //[[tcp_queue_rcv()]]
 			  
 			tcp_event_data_recv(sk, skb);
 			  
@@ -173,7 +179,7 @@ no_ack:
 			return;
 		}
 	}
-  
+// e. 느린 경로
 slow_path:
 	if (len < (th->doff << 2) || tcp_checksum_complete(skb))
 		goto csum_error;
@@ -202,7 +208,7 @@ step5:
 	tcp_urg(sk, skb, th);
 	  
 	/* step 7: process the segment text */
-	tcp_data_queue(sk, skb);
+	tcp_data_queue(sk, skb);  // [[tcp_data_queue()]]
 	  
 	tcp_data_snd_check(sk);
 	tcp_ack_snd_check(sk);
@@ -219,20 +225,27 @@ discard:
 }
 ```
 
+>**a. 변수 초기화**
 >맨 처음에 `skb->data`를 캐스팅하여 tcp header를 얻게 된다. 또한, 주어진 소켓을 통해 `tcp_sock`타입의 포인터를 획득한다.
 >또한 `len`이라는 변수를 설정하게 되는데, `skb->len`값으로 가져오게 된다.
 > flag들과 seqeunce, ack num 이 모두 같은지 확인하고
+> 
+> 	**b. 빠른 경로 확인**
 > 	`tcp_sock`구조체에서 정의된`tcp_header_len`이 주어진 tcp 헤더와 길이가 일치하는지 확인하고, `tcp_parse_aligned_timestamp()`함수를 통해 slow_path인지 확인한다. 이때 주어진 타임스탬프 옵션이 NOP NOP OP_num OP_len 로 포인터로 확인하여 이것이 일치하면 fast_path이다. 또한 PAWS도 확인한다.
 > 	
+> 	**c.  빠른 경로 ACK 처리**
 > 	 그 다음으로는 `len`이 `tcp_header_len`보다 작거나 같은 경우를 확인하게 된다. 만약 `len`이 `tcp_header_len`과 같다면 이는 페이로드가 없는 순수한 `ACK` 패킷이라는 것이다.(pure sender)
 > 	 이때 만약 둘이 같다면 `tcp_ack()`함수를 통해 incoming pure ACK 패킷들을 다루게 된다.
 > 	 그리고 이 후 해당 `skb`를 할당해제하여 bottom half가 끝나게 된다.
 > 	 만약 `len`이 `tcp_header_len`보다 작다면, 이는 오류 이므로 discard 하게 된다.
 > 	 
+> 	 **d. 빠른 경로 데이터 수신 처리**
 > 	 만약 `len` > `tcp_header_len`이라면, 이는 pure receiver라는 뜻이다. 여기서 다시 한 번 checksum 과 truesize, tcp_header_len을 확인하고, RTT를 확인하게 된다.
 > 	 이후 `skb`의 `dst_entry`를 드랍하고, tcp 헤더 길이만큼 포인터를 옮긴 다음에 남은 `skb->data`가 페이로드를 가르키게 하여 `tcp_queue_rcv()` 함수를 실행하게 한다. 	이를 `eaten` 변수에 저장하게 된다. 또한 `tcp_event_data_recv()`함수를 실행하여 cwnd가 빠르게 증가할 수 있도록 한다.
 > 	 
 > 	 그후 ack 확인을 하고 `tcp_ack()`함수를 실행한다. 또한 `tcp_data_snd_check()`함수를 실행하고, 소켓의 윈도우 크기를 업데이트 하며 만약 eaten 된 패킷이 있다면 `tcp_data_ready()`를 실행하여  해당 소켓의 데이터가 준비되었음을 알리게 된다.
+> 	 
+ **e. 느린 경로**
 > 여기서부터는 slow path이다.
 > 	csum과 flag들을 확인하고, `tcp_validate_incoming()`함수를 통해 해당 패킷이 유효한 수신패킷인지 확인하게 된다. 그리고 유효하다면, `tcp_ack()`를 통해 ack 패킷을 보내게 되고, rtt를 측정하고 urgent data를 처리하기 위해 `tcp_urg()`를 실행하게 된다. 마지막으로 `tcp_data_queue`라는 함수를 실행하게 되는데, 이는 slow path에서 데이터를 소켓으로 넣어주는 함수이다. 그후 `tcp_data_snd_check()` 와 `tcp_ack_snd_check()`함수를 실행하고 함수가 종료된다.
 > 

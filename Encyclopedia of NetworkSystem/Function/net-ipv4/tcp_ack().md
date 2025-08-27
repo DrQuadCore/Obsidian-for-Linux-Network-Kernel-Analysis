@@ -24,6 +24,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	/* We very likely will need to access rtx queue. */
 	prefetch(sk->tcp_rtx_queue.rb_node);
 
+	// a. 이전, 이후 ACK 검사
 	/* If the ack is older than previous acks
 	 * then we can probably ignore it.
 	 */
@@ -47,6 +48,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	if (after(ack, tp->snd_nxt))
 		return -SKB_DROP_REASON_TCP_ACK_UNSENT_DATA;
 
+	// b. 
 	if (after(ack, prior_snd_una)) {
 		flag |= FLAG_SND_UNA_ADVANCED;
 		icsk->icsk_retransmits = 0;
@@ -66,9 +68,11 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	 */
 	if (flag & FLAG_UPDATE_TS_RECENT)
 		tcp_replace_ts_recent(tp, TCP_SKB_CB(skb)->seq);
-
+	
+	// c. 빠른 경로, 느린 경로 분기
 	if ((flag & (FLAG_SLOWPATH | FLAG_SND_UNA_ADVANCED)) ==
 	    FLAG_SND_UNA_ADVANCED) {
+	    // 빠른 경로
 		/* Window is constant, pure forward advance.
 		 * No more checks are required.
 		 * Note, we use the fact that SND.UNA>=SND.WL2.
@@ -81,6 +85,7 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPHPACKS);
 	} else {
+		// 느린 경로
 		u32 ack_ev_flags = CA_ACK_SLOWPATH;
 
 		if (ack_seq != TCP_SKB_CB(skb)->end_seq)
@@ -108,7 +113,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 		tcp_in_ack_event(sk, ack_ev_flags);
 	}
-
+	
+	// d.
 	/* This is a deviation from RFC3168 since it states that:
 	 * "When the TCP data sender is ready to set the CWR bit after reducing
 	 * the congestion window, it SHOULD set the CWR bit only on the first
@@ -135,7 +141,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 
 	if (tp->tlp_high_seq)
 		tcp_process_tlp_ack(sk, ack, flag);
-
+	
+	// e. 중복 ACK 처리
 	if (tcp_ack_is_dubious(sk, flag)) {
 		if (!(flag & (FLAG_SND_UNA_ADVANCED |
 			      FLAG_NOT_DUP | FLAG_DSACKING_ACK))) {
@@ -147,7 +154,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 		tcp_fastretrans_alert(sk, prior_snd_una, num_dupack, &flag,
 				      &rexmit);
 	}
-
+	
+	// f. 최종 혼잡 제어
 	/* If needed, reset TLP/RTO timer when RACK doesn't set. */
 	if (flag & FLAG_SET_XMIT_TIMER)
 		tcp_set_xmit_timer(sk);
@@ -197,6 +205,20 @@ old_ack:
 }
 ```
 
-`tcp_cong_control()` 을 실행한다.
+**a. 이전, 이후 ACK 검사**
+이미 처리된 ACK라면 드롭
+아직 보내지 않은 데이터에 대한 ACK라면 드롭
+**b.**
+
+**c. 빠른 경로, 느린 경로 분기**
+- 윈도우가 일정하고, 윈도우를 앞으로만 옮길 때 `tcp_in_ack_event()` 함수에 `CA_ACK_WIN_UPDATE` 플래그만 줘서 간단한 혼잡 제어만 처리
+- 그 외 느린 경로에서는 `tcp_ack_update_window()`함수로 플래그 조합해서  `tcp_in_ack_event()`로 전달
+**d.**
+
+**e. 중복 ACK 처리**
+`tcp_ack_is_dubious()`
+
+**f. 최종 혼잡 제어**
+`tcp_cong_control()` 을 실행해 cwnd 조정
 
 [[tcp_cong_control()]]

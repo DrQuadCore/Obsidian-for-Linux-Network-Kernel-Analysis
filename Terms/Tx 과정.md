@@ -353,8 +353,10 @@ int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)
 	}
 
 	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
+	// 전송 타임아웃 계산
 
 	tcp_rate_check_app_limited(sk);  /* is sending application-limited? */
+	// 제한속도 체크
 
 	/* Wait for a connection to finish. One exception is TCP Fast Open
 	 * (passive side) where data is allowed to be sent before a connection
@@ -366,17 +368,19 @@ int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)
 		if (err != 0)
 			goto do_error;
 	}
+	// TCP 연결이 되었거나 종료 중이 아니라면, 연결을 대기한다
 
-	if (unlikely(tp->repair)) {
+	if (unlikely(tp->repair)) { // tcp의 repair 모드가 설정되어있는지 확인
 		if (tp->repair_queue == TCP_RECV_QUEUE) {
 			copied = tcp_send_rcvq(sk, msg, size);
 			goto out_nopush;
 		}
+		// 수신 큐로 전송, 소켓 정보(경로 등)가 제대로 변경되었는지 테스트(시뮬레이션)하고자 수신 큐로 보내보는 것. 일반적인 TCP 전송에서는 발생하지 않는 경로.
 
 		err = -EINVAL;
 		if (tp->repair_queue == TCP_NO_QUEUE)
 			goto out_err;
-
+		// repair queue가 설정안되어 있으면 오류
 		/* 'common' sending to sendq */
 	}
 
@@ -393,23 +397,26 @@ int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)
 
 restart:
 	mss_now = tcp_send_mss(sk, &size_goal, flags);
-
+	// mss 계산 및 size_goal 변수 초기화
+	
 	err = -EPIPE;
 	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))
 		goto do_error;
+	// 에러가 발생했거나 종료되었는지 체크
 
-	while (msg_data_left(msg)) {
+	while (msg_data_left(msg)) { // 남아있는 msg에 대해 반복
 		int copy = 0;
 
 		skb = tcp_write_queue_tail(sk);
 		if (skb)
 			copy = size_goal - skb->len;
-
+		// write queue로부터 skb 가져오고 skb가 null이 아니라면 copy값 감소
+		
 		trace_tcp_sendmsg_locked(sk, msg, skb, size_goal);
 
-		if (copy <= 0 || !tcp_skb_can_collapse_to(skb)) {
+		if (copy <= 0 || !tcp_skb_can_collapse_to(skb)) { // 첫 번째 skb인 경우
 			bool first_skb;
-
+	
 new_segment:
 			if (!sk_stream_memory_free(sk))
 				goto wait_for_space;
@@ -419,9 +426,13 @@ new_segment:
 				if (sk_flush_backlog(sk))
 					goto restart;
 			}
+			//process_backlog가 꽉찼다면 flush합니다
+			
 			first_skb = tcp_rtx_and_write_queues_empty(sk);
+			// rtx와 write 큐가 비어있는지 확인
 			skb = tcp_stream_alloc_skb(sk, sk->sk_allocation,
 						   first_skb);
+			// skb 할당
 			if (!skb)
 				goto wait_for_space;
 
@@ -431,8 +442,9 @@ new_segment:
 			skb->decrypted = !!(flags & MSG_SENDPAGE_DECRYPTED);
 #endif
 			tcp_skb_entail(sk, skb);
+			// write 큐에 enqueue
 			copy = size_goal;
-
+			// copy값을 size_goal 값으로 변경
 			/* All packets are restored as if they have
 			 * already been sent. skb_mstamp_ns isn't set to
 			 * avoid wrong rtt estimation.
@@ -444,26 +456,29 @@ new_segment:
 		/* Try to append data to the end of skb. */
 		if (copy > msg_data_left(msg))
 			copy = msg_data_left(msg);
-
-		if (zc == 0) {
+		// copy값이 남은 msg보다 크다면 msg로 변경
+		
+		if (zc == 0) { // 일반적인 경로
 			bool merge = true;
 			int i = skb_shinfo(skb)->nr_frags;
 			struct page_frag *pfrag = sk_page_frag(sk);
 
 			if (!sk_page_frag_refill(sk, pfrag))
 				goto wait_for_space;
-
+			// prfrag에 새 page를 할당
+			
 			if (!skb_can_coalesce(skb, i, pfrag->page,
-					      pfrag->offset)) {
+					      pfrag->offset)) { // skb를 coalescing할 수 없는 경우
 				if (i >= READ_ONCE(net_hotdata.sysctl_max_skb_frags)) {
 					tcp_mark_push(tp, skb);
 					goto new_segment;
-				}
+				} // frag이 최댓값 이상이라면 push라고 마킹
 				merge = false;
 			}
 
 			copy = min_t(int, copy, pfrag->size - pfrag->offset);
-
+			// 페이지에 남은 양과 복사할 양 중 더 작은 값으로 변경
+			
 			if (unlikely(skb_zcopy_pure(skb) || skb_zcopy_managed(skb))) {
 				if (tcp_downgrade_zcopy_pure(sk, skb))
 					goto wait_for_space;
@@ -471,6 +486,8 @@ new_segment:
 			}
 
 			copy = tcp_wmem_schedule(sk, copy);
+			// wmem에 남은 양과 복사할 양 중 더 작은 값으로 변경
+			
 			if (!copy)
 				goto wait_for_space;
 
@@ -478,6 +495,7 @@ new_segment:
 						       pfrag->page,
 						       pfrag->offset,
 						       copy);
+			// 데이터를 skb로 복사합니다
 			if (err)
 				goto do_error;
 
@@ -544,13 +562,14 @@ new_segment:
 		WRITE_ONCE(tp->write_seq, tp->write_seq + copy);
 		TCP_SKB_CB(skb)->end_seq += copy;
 		tcp_skb_pcount_set(skb, 0);
+		// tcp seq num 설정
 
 		copied += copy;
 		if (!msg_data_left(msg)) {
 			if (unlikely(flags & MSG_EOR))
 				TCP_SKB_CB(skb)->eor = 1;
 			goto out;
-		}
+		} // 보낼 msg가 더이상 없다면 out label로 이동
 
 		if (skb->len < size_goal || (flags & MSG_OOB) || unlikely(tp->repair))
 			continue;
@@ -558,8 +577,10 @@ new_segment:
 		if (forced_push(tp)) {
 			tcp_mark_push(tp, skb);
 			__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
+		// 즉시 전송을 해야한다면 대기 중인 모든 세그먼트들을 넘김
 		} else if (skb == tcp_send_head(sk))
 			tcp_push_one(sk, mss_now);
+			// 현재 skb가 write 큐 맨 앞에 있으면 즉시 전송
 		continue;
 
 wait_for_space:
@@ -580,7 +601,7 @@ out:
 	if (copied) {
 		tcp_tx_timestamp(sk, &sockc);
 		tcp_push(sk, flags, mss_now, tp->nonagle, size_goal);
-	}
+	} // 커널로 복사된 데이터가 있으면 다음 단계로 넘어감
 out_nopush:
 	/* msg->msg_ubuf is pinned by the caller so we don't take extra refs */
 	if (uarg && !msg->msg_ubuf)
@@ -717,3 +738,207 @@ int __sock_cmsg_send(struct sock *sk, struct cmsghdr *cmsg,
 }
 ```
 - cmsg_type에 따라 부가 처리를 진행한다.
+
+### tcp_push()
+```c
+void tcp_push(struct sock *sk, int flags, int mss_now,
+	      int nonagle, int size_goal)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *skb;
+
+	skb = tcp_write_queue_tail(sk);
+	if (!skb)
+		return;
+	if (!(flags & MSG_MORE) || forced_push(tp))
+		tcp_mark_push(tp, skb);
+
+	tcp_mark_urg(tp, flags);
+
+	if (tcp_should_autocork(sk, skb, size_goal)) {
+
+		/* avoid atomic op if TSQ_THROTTLED bit is already set */
+		if (!test_bit(TSQ_THROTTLED, &sk->sk_tsq_flags)) {
+			NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPAUTOCORKING);
+			set_bit(TSQ_THROTTLED, &sk->sk_tsq_flags);
+			smp_mb__after_atomic();
+		}
+		/* It is possible TX completion already happened
+		 * before we set TSQ_THROTTLED.
+		 */
+		if (refcount_read(&sk->sk_wmem_alloc) > skb->truesize)
+			return;
+	}
+
+	if (flags & MSG_MORE)
+		nonagle = TCP_NAGLE_CORK;
+
+	__tcp_push_pending_frames(sk, mss_now, nonagle);
+}
+```
+- net/ipv4/tcp.c에 구현되어있습니다.
+- write 큐에서 skb를 가져오고 MSG_MORE 플래그가 없거나 강제 push가 가능한 경우, 마킹을 진행합니다.
+- MSB_OOB 플래그가 있다면, URG 플래그를 설정합니다.
+- 자동 corking이 가능하다면 Transmit 큐에 대해서 플래그를 설정하여 지연시킵니다.
+- MSG_MORE 플래그가 활성되어있는 경우, nonagle 값을 변경합니다.
+
+### \_\_tcp_push_peding_frames()
+```c
+void __tcp_push_pending_frames(struct sock *sk, unsigned int cur_mss,
+			       int nonagle)
+{
+	/* If we are closed, the bytes will have to remain here.
+	 * In time closedown will finish, we empty the write queue and
+	 * all will be happy.
+	 */
+	if (unlikely(sk->sk_state == TCP_CLOSE))
+		return;
+
+	if (tcp_write_xmit(sk, cur_mss, nonagle, 0,
+			   sk_gfp_mask(sk, GFP_ATOMIC)))
+		tcp_check_probe_timer(sk);
+}
+```
+- net/ipv4/tcp.c에 구현되어있습니다.
+- TCP 연결이 끊어졌다면 바로 종료합니다.
+- 전송을 진행하고, 시간을 측정합니다.
+
+### tcp_write_xmit()
+```c
+static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
+			   int push_one, gfp_t gfp)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *skb;
+	unsigned int tso_segs, sent_pkts;
+	u32 cwnd_quota, max_segs;
+	int result;
+	bool is_cwnd_limited = false, is_rwnd_limited = false;
+
+	sent_pkts = 0;
+
+	tcp_mstamp_refresh(tp);
+	if (!push_one) {
+		/* Do MTU probing. */
+		result = tcp_mtu_probe(sk);
+		if (!result) {
+			return false;
+		} else if (result > 0) {
+			sent_pkts = 1;
+		}
+	}
+
+	max_segs = tcp_tso_segs(sk, mss_now);
+	// TSO 사용시 나눌 수 있는 최대 세그먼트 수 계산
+	
+	while ((skb = tcp_send_head(sk))) { // write 큐의 헤드에서 skb 추출
+		unsigned int limit;
+		int missing_bytes;
+
+		if (unlikely(tp->repair) && tp->repair_queue == TCP_SEND_QUEUE) {
+			/* "skb_mstamp_ns" is used as a start point for the retransmit timer */
+			tp->tcp_wstamp_ns = tp->tcp_clock_cache;
+			skb_set_delivery_time(skb, tp->tcp_wstamp_ns, SKB_CLOCK_MONOTONIC);
+			list_move_tail(&skb->tcp_tsorted_anchor, &tp->tsorted_sent_queue);
+			tcp_init_tso_segs(skb, mss_now);
+			goto repair; /* Skip network transmission */
+		}
+
+		if (tcp_pacing_check(sk))
+			break;
+		// 페이싱 체크
+
+		cwnd_quota = tcp_cwnd_test(tp);
+		if (!cwnd_quota) {
+			if (push_one == 2)
+				/* Force out a loss probe pkt. */
+				cwnd_quota = 1;
+			else
+				break;
+		} // cwnd에서 더 보낼 수 있는 양 체크
+		
+		
+		cwnd_quota = min(cwnd_quota, max_segs);
+		missing_bytes = cwnd_quota * mss_now - skb->len;
+		if (missing_bytes > 0)
+			tcp_grow_skb(sk, skb, missing_bytes);
+		// 보낼 수 있는 양보다 보내야 하는 양이 많다면 남은 데이터를 보내기 위해 skb 확장
+		tso_segs = tcp_set_skb_tso_segs(skb, mss_now);
+		// tso 활성화시, 몇 개의 segment가 나오는지 계산
+		
+		if (unlikely(!tcp_snd_wnd_test(tp, skb, mss_now))) {
+			is_rwnd_limited = true;
+			break;
+		} // 윈도우가 충분한지 체크 ('s'wnd를 테스트하고 'r'wnd를 제한...?)
+
+		if (tso_segs == 1) {
+			if (unlikely(!tcp_nagle_test(tp, skb, mss_now,
+						     (tcp_skb_is_last(sk, skb) ?
+						      nonagle : TCP_NAGLE_PUSH))))
+				break;
+				// tso가 비활성화인 경우, nagle이 비활성화되어있지 않으면 종료
+		} else {
+			if (!push_one &&
+			    tcp_tso_should_defer(sk, skb, &is_cwnd_limited,
+						 &is_rwnd_limited, max_segs))
+				break;
+		}
+
+		limit = mss_now;
+		if (tso_segs > 1 && !tcp_urg_mode(tp))
+			limit = tcp_mss_split_point(sk, skb, mss_now,
+						    cwnd_quota,
+						    nonagle);
+
+		if (skb->len > limit &&
+		    unlikely(tso_fragment(sk, skb, limit, mss_now, gfp)))
+			break;
+
+		if (tcp_small_queue_check(sk, skb, 0))
+			break;
+
+		/* Argh, we hit an empty skb(), presumably a thread
+		 * is sleeping in sendmsg()/sk_stream_wait_memory().
+		 * We do not want to send a pure-ack packet and have
+		 * a strange looking rtx queue with empty packet(s).
+		 */
+		if (TCP_SKB_CB(skb)->end_seq == TCP_SKB_CB(skb)->seq)
+			break;
+
+		if (unlikely(tcp_transmit_skb(sk, skb, 1, gfp)))
+			break;
+		// skb 전송
+repair:
+		/* Advance the send_head.  This one is sent out.
+		 * This call will increment packets_out.
+		 */
+		tcp_event_new_data_sent(sk, skb);
+
+		tcp_minshall_update(tp, mss_now, skb);
+		sent_pkts += tcp_skb_pcount(skb);
+
+		if (push_one)
+			break;
+	}
+
+	if (is_rwnd_limited)
+		tcp_chrono_start(sk, TCP_CHRONO_RWND_LIMITED);
+	else
+		tcp_chrono_stop(sk, TCP_CHRONO_RWND_LIMITED);
+
+	is_cwnd_limited |= (tcp_packets_in_flight(tp) >= tcp_snd_cwnd(tp));
+	if (likely(sent_pkts || is_cwnd_limited))
+		tcp_cwnd_validate(sk, is_cwnd_limited);
+
+	if (likely(sent_pkts)) {
+		if (tcp_in_cwnd_reduction(sk))
+			tp->prr_out += sent_pkts;
+
+		/* Send one loss probe per tail loss episode. */
+		if (push_one != 2)
+			tcp_schedule_loss_probe(sk, false);
+		return false;
+	}
+	return !tp->packets_out && !tcp_write_queue_empty(sk);
+}
+```

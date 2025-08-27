@@ -154,7 +154,7 @@ u8 sk_pacing_shift;
 bool sk_use_task_frag;
 __cacheline_group_end(sock_read_tx);
   
-/*
+/*ㄴ
 * Because of non atomicity rules, all
 * changes are protected by socket lock.
 */

@@ -39,3 +39,4 @@ SYSCALL_DEFINE6(epoll_pwait, int, epfd, struct epoll_event __user *, events,
 	return error;
 }
 ```
+- fd 이벤트와 signal 이벤트를 동시에 기다릴 수 있음

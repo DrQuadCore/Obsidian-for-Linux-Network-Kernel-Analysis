@@ -324,7 +324,7 @@ flowi4 구조체는 위와 같이 source address, destination address, protocol 
      */
     
     tun_info = skb_tunnel_info(skb); 
-    if (tun_info && !(tun_info->mode & IP_TUNNEL_INFO_TX))
+	    if (tun_info && !(tun_info->mode & IP_TUNNEL_INFO_TX))
         fl4.flowi4_tun_key.tun_id = tun_info->key.tun_id;
     else
         fl4.flowi4_tun_key.tun_id = 0;
@@ -332,6 +332,8 @@ flowi4 구조체는 위와 같이 source address, destination address, protocol 
 ```
 
 skb에 터널 관련 metatdata(strcuct ip_tunnel_info)가 존재하는지 확인한다. 만약 tun_info가 존재하고, '수신'된 터널 패킷이라면 tun_id를 flowi4 구조체에 기록한다.
+> 2025/08/26 스터디
+> 만약 tun_info가 있고, 그것이 송신용이 아니라면 tun_id를 기록하기 위해서 조건이 !(tun_info->mode & IP_TUNNEL_INFO_TX) 이렇게 쓰임. 송신용이 아닌지 확인하기 위해 TX flag를 확인하는 것임.
 
 ```c
     if (ipv4_is_multicast(saddr) || ipv4_is_lbcast(saddr))
@@ -375,8 +377,19 @@ source address나 destination address가 0이면 martian packet으로 취급한�
     }
 ```
 
-source address나 destination address가 loopback 주소일 경우, IN_DEV_NET_ROUTE_LOCALNET을 확인해서 꺼져 있으면 해당 패킷을 martian으로 버린다.
-(이게 켜져 있으면 loopback 주소를 네트워크 인터페이스로 들어오거나 나가는 패킷에 허용한다는 의미)
+source address나 destination address가 loopback 주소일 경우, IN_DEV_NET_ROUTE_LOCALNET()를 통해  ROUTE_LOCALNET flag가 꺼져 있으면 해당 패킷을 martian으로 버린다.
+
+> 2025/08/26 스터디
+> IN_DEV_NET_ROUTE_LOCALNET는 매크로로 정의돼 있음. `ROUTE_LOCALNET` 옵션을 읽어와서 켜져 있는지 확인함. 즉, 이 in_dev(= 수신 인터페이스)에 대해 route_localnet이 켜져 있는지 확인하는 과정임. 
+```
+ #define IN_DEV_NET_ROUTE_LOCALNET(in_dev, net)	\
+	IN_DEV_NET_ORCONF(in_dev, net, ROUTE_LOCALNET)
+
+ #define IN_DEV_NET_ORCONF(in_dev, net, attr) \
+	(IPV4_DEVCONF_ALL_RO(net, attr) || \
+	 IN_DEV_CONF_GET((in_dev), attr))
+```
+
 
 ```c
 	/*
@@ -430,4 +443,40 @@ local_input:
             goto out;
         }
     }
+	
+	// 새 dst entry(rtable)를 생성해서 skb->dst에 붙임
+    rth = rt_dst_alloc(ip_rt_get_dev(net, res),
+               flags | RTCF_LOCAL, res->type, false);
+    if (!rth)
+        goto e_nobufs;
+  
+    rth->dst.output= ip_rt_bug;
+#ifdef CONFIG_IP_ROUTE_CLASSID
+    rth->dst.tclassid = itag;
+#endif
+    rth->rt_is_input = 1;
+  
+    RT_CACHE_STAT_INC(in_slow_tot);
+    if (res->type == RTN_UNREACHABLE) {
+        rth->dst.input= ip_error;
+        rth->dst.error= -err;
+        rth->rt_flags   &= ~RTCF_LOCAL;
+    }
+  
+    if (do_cache) {
+        struct fib_nh_common *nhc = FIB_RES_NHC(*res);
+  
+        rth->dst.lwtstate = lwtstate_get(nhc->nhc_lwtstate);
+        if (lwtunnel_input_redirect(rth->dst.lwtstate)) {
+            WARN_ON(rth->dst.input == lwtunnel_input);
+            rth->dst.lwtstate->orig_input = rth->dst.input;
+            rth->dst.input = lwtunnel_input;
+        }
+        
+        if (unlikely(!rt_cache_route(nhc, rth)))
+            rt_add_uncached_list(rth);
+    }
+    skb_dst_set(skb, &rth->dst); // 새로 만든 dst를 skb에 set
+    err = 0;
+    goto out;
 ```

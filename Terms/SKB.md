@@ -121,5 +121,8 @@ size:   frags[0].size     size:   frags[1].size     ...
 
 frag_list는 frags[]와 다르게 page fragment가 아니라 서로 다른 skb 자체를 이어붙일 때 사용한다. 보통 큰 packet을 여러 skb로 나누어 관리해야 할 때 사용한다. 예를 들어, GSO가 켜져 있으면, skb를 만드는 과정에서 큰 payload를 여러 skb 조각들로 나누고 이들을 frag_list로 연결할 수 있다. 즉, frag_list를 통해 하나의 큰 skb를 실제로는 여러 작은 skb들의 체인처럼 이룰 수 있다. [[주요 개념 구조도]]
 
-
 [Understanding sk_buff: Linear and Fragment Data Organization in Linux Kernel Networking](https://www.linkedin.com/pulse/understanding-skbuff-linear-fragment-data-organization-david-zhu-aoqqc)
+
+> 2025/08/21 스터디
+> Q. frags는 언제 어떻게 생기는지
+> A. skb에 frags가 채워지는 과정은 [[ice_clean_rx_irq()]]함수에서 호출되는 [[ice_construct_skb()]]내부에서 일어난다.

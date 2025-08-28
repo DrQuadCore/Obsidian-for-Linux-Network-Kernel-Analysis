@@ -24,6 +24,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	 * because we want the "sproc" callback to be able to do it
 	 * in a lockless way.
 	 */
+	 //rdllist에 있는 event 모두 txlist로 새 event는 ovflist에 저장되게
 	spin_lock_irqsave(&ep->lock, flags);
 	list_splice_init(&ep->rdllist, &txlist);
 	ep->ovflist = NULL;
@@ -40,6 +41,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
 	 * other events might have been queued by the poll callback.
 	 * We re-insert them inside the main ready-list here.
 	 */
+	 //ovflist -> rdllist 재주입
 	for (nepi = ep->ovflist; (epi = nepi) != NULL;
 	     nepi = epi->next, epi->next = EP_UNACTIVE_PTR) {
 		/*

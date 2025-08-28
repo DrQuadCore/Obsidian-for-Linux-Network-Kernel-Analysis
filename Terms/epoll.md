@@ -15,16 +15,18 @@ struct eventpoll {
 	struct mutex mtx;
 
 	/* Wait queue used by sys_epoll_wait() */
+	//epoll_wait()호출한 task sleep
 	wait_queue_head_t wq;
 
 	/* Wait queue used by file->poll() */
-	//다른 epoll에게 감시 당할 때
+	//다른 epoll에게 감시 당할 때 외부 epoll의 waitqueue entry
 	wait_queue_head_t poll_wait;
 
 	/* List of ready file descriptors */
 	struct list_head rdllist;
 
 	/* RB tree root used to store monitored fd structs */
+	//fd 집합
 	struct rb_root rbr;
 
 	/*

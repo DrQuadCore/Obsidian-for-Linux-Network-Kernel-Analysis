@@ -35,6 +35,7 @@ static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
 		list_del_init(&epi->rdllink);
 
 		pt._key = epi->event.events;
+		//실제 events & 유저가 원하는 events
 		revents = epi->ffd.file->f_op->poll(epi->ffd.file, &pt) &
 			epi->event.events;
 

@@ -37,6 +37,7 @@ struct eventpoll {
 	struct epitem *ovflist;
 
 	/* wakeup_source used when ep_scan_ready_list is running */
+	//suspend방지
 	struct wakeup_source *ws;
 
 	/* The user that created the eventpoll descriptor */

@@ -189,12 +189,12 @@ process:
 	  
 	skb->dev = NULL;
 	
-	// j. LISTEN 상태일 때 처리
+	// LISTEN 상태일 때 처리
 	if (sk->sk_state == TCP_LISTEN) {
 		ret = tcp_v4_do_rcv(sk, skb);     // [[tcp_v4_do_rcv()]]
 		goto put_and_return;
 	}  
-	// ESTABLISHED 상태일 때 처리
+	// LISTEN 상태가 아닐 때 처리
 	sk_incoming_cpu_update(sk);
 	  
 	bh_lock_sock_nested(sk);
@@ -328,7 +328,7 @@ do_time_wait:
 >이후 정책값 확인, ttl 확인 및 `tcp_filter()`등을 통해 패킷을 검사하고, `tcp_v4_fill_cb()`함수를 통해 메타데이터를 채운다음, 
 >만약 소켓의 상태가 `TCP_LISTEN`이라면 `tcp_v4_do_rcv()`함수를 호출하고, `ret`에 결과를 저장하여 `put_and_return`라벨로 건너뛰게 된다.
 
-> **j. LISTEN 상태일 때 처리** 
+> **j. LISTEN 상태가 아닐 때 처리** 
 > 그게 아니라면 `sk_incoming_cpu_update()`를 실행하여 현재 패킷을 처리하는 코어가 어느 것인지 업데이트 후 user context에서 사용 중인지를 확인하고 사용하지 않는다면 `tcp_v4_do_rcv()`함수를 실행하게 된다. 만약 사용중이라면 `tcp_add_backlog()`함수를 실행하게 된다.
 
 >**k. 처리 완료 후 리소스 정리** 

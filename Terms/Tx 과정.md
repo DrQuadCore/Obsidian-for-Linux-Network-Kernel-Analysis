@@ -129,6 +129,8 @@ int __sys_sendto(int fd, void __user *buff, size_t len, unsigned int flags,
         struct msghdr msg;
 
         err = import_ubuf(ITER_SOURCE, buff, len, &msg.msg_iter);
+        //msg_iter 멤버 초기화
+        
         if (unlikely(err))
                 return err;
 
@@ -829,7 +831,7 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
 	}
 
 	max_segs = tcp_tso_segs(sk, mss_now);
-	// TSO 사용시 나눌 수 있는 최대 세그먼트 수 계산
+	// TSO 사용시 나눌 수 있는 최대 세그먼트 수 계산 (wnd 한도 고려 X)
 	
 	while ((skb = tcp_send_head(sk))) { // write 큐의 헤드에서 skb 추출
 		unsigned int limit;
@@ -876,12 +878,13 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
 						     (tcp_skb_is_last(sk, skb) ?
 						      nonagle : TCP_NAGLE_PUSH))))
 				break;
-				// tso가 비활성화인 경우, nagle이 비활성화되어있지 않으면 종료
+				// tso segment가 1개인 경우, nagle 적용여부 확인
 		} else {
 			if (!push_one &&
 			    tcp_tso_should_defer(sk, skb, &is_cwnd_limited,
 						 &is_rwnd_limited, max_segs))
 				break;
+				// cwnd나 rwnd에 의해 전송이 지연되어야하는지 확인
 		}
 
 		limit = mss_now;
@@ -889,6 +892,7 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
 			limit = tcp_mss_split_point(sk, skb, mss_now,
 						    cwnd_quota,
 						    nonagle);
+		// tso가 가능하다면 split 단위 계산
 
 		if (skb->len > limit &&
 		    unlikely(tso_fragment(sk, skb, limit, mss_now, gfp)))
@@ -942,3 +946,836 @@ repair:
 	return !tp->packets_out && !tcp_write_queue_empty(sk);
 }
 ```
+
+
+### tcp_transmit_skb
+```c
+static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+			    gfp_t gfp_mask)
+{
+	return __tcp_transmit_skb(sk, skb, clone_it, gfp_mask,
+				  tcp_sk(sk)->rcv_nxt);
+}
+```
+- tcp의 receive sequence number를 추가하여 함수를 호출합니다.
+### \_\_tcp_transmit_skb()
+```c
+static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
+			      int clone_it, gfp_t gfp_mask, u32 rcv_nxt)
+{
+	const struct inet_connection_sock *icsk = inet_csk(sk);
+	struct inet_sock *inet;
+	struct tcp_sock *tp;
+	struct tcp_skb_cb *tcb;
+	struct tcp_out_options opts;
+	unsigned int tcp_options_size, tcp_header_size;
+	struct sk_buff *oskb = NULL;
+	struct tcp_key key;
+	struct tcphdr *th;
+	u64 prior_wstamp;
+	int err;
+
+	BUG_ON(!skb || !tcp_skb_pcount(skb));
+	// skb 유효성 검사
+	tp = tcp_sk(sk);
+	prior_wstamp = tp->tcp_wstamp_ns;
+	tp->tcp_wstamp_ns = max(tp->tcp_wstamp_ns, tp->tcp_clock_cache);
+	skb_set_delivery_time(skb, tp->tcp_wstamp_ns, SKB_CLOCK_MONOTONIC);
+	// 타임스탬프 관련
+	
+	if (clone_it) { // clone_it이 1인 경우 skb 복제
+		oskb = skb;
+
+		tcp_skb_tsorted_save(oskb) {
+			if (unlikely(skb_cloned(oskb)))
+				skb = pskb_copy(oskb, gfp_mask);
+			// 이미 복사된 skb라면 (다른 곳에서 참조중이라면) deep copy
+			else
+				skb = skb_clone(oskb, gfp_mask);
+				// 그렇지 않으면 shallow copy
+		} tcp_skb_tsorted_restore(oskb);
+
+		if (unlikely(!skb))
+			return -ENOBUFS;
+		/* retransmit skbs might have a non zero value in skb->dev
+		 * because skb->dev is aliased with skb->rbnode.rb_left
+		 */
+		skb->dev = NULL;
+	}
+
+	inet = inet_sk(sk);
+	tcb = TCP_SKB_CB(skb);
+	memset(&opts, 0, sizeof(opts));
+
+	tcp_get_current_key(sk, &key);
+	if (unlikely(tcb->tcp_flags & TCPHDR_SYN)) {
+		// SYN 패킷인 경우
+		tcp_options_size = tcp_syn_options(sk, skb, &opts, &key); // SYN 패킷 용 옵션 추가
+	} else {
+		tcp_options_size = tcp_established_options(sk, skb, &opts, &key); // 그외 패킷용 옵션 추가
+		/* Force a PSH flag on all (GSO) packets to expedite GRO flush
+		 * at receiver : This slightly improve GRO performance.
+		 * Note that we do not force the PSH flag for non GSO packets,
+		 * because they might be sent under high congestion events,
+		 * and in this case it is better to delay the delivery of 1-MSS
+		 * packets and thus the corresponding ACK packet that would
+		 * release the following packet.
+		 */
+		if (tcp_skb_pcount(skb) > 1)
+			tcb->tcp_flags |= TCPHDR_PSH;
+	} // TSO/GSO 패킷이면 PUSH 플래그 설정
+	tcp_header_size = tcp_options_size + sizeof(struct tcphdr); // tcp 헤더 사이즈
+
+	/* We set skb->ooo_okay to one if this packet can select
+	 * a different TX queue than prior packets of this flow,
+	 * to avoid self inflicted reorders.
+	 * The 'other' queue decision is based on current cpu number
+	 * if XPS is enabled, or sk->sk_txhash otherwise.
+	 * We can switch to another (and better) queue if:
+	 * 1) No packet with payload is in qdisc/device queues.
+	 *    Delays in TX completion can defeat the test
+	 *    even if packets were already sent.
+	 * 2) Or rtx queue is empty.
+	 *    This mitigates above case if ACK packets for
+	 *    all prior packets were already processed.
+	 */
+	skb->ooo_okay = sk_wmem_alloc_get(sk) < SKB_TRUESIZE(1) ||
+			tcp_rtx_queue_empty(sk);
+	// write buffer와 retransmission queue가 비어있는 경우에만 xps 허용
+
+	/* If we had to use memory reserve to allocate this skb,
+	 * this might cause drops if packet is looped back :
+	 * Other socket might not have SOCK_MEMALLOC.
+	 * Packets not looped back do not care about pfmemalloc.
+	 */
+	skb->pfmemalloc = 0;
+
+	skb_push(skb, tcp_header_size);
+	skb_reset_transport_header(skb);
+	// skb에 헤더 포인터 수정
+	skb_orphan(skb);
+	// sk로부터 분리(참조 카운터 감소)
+	skb->sk = sk;
+	// accounting을 위해서 포인터만 남겨둠
+	skb->destructor = skb_is_tcp_pure_ack(skb) ? __sock_wfree : tcp_wfree; // skb desctructor 함수 할당
+	refcount_add(skb->truesize, &sk->sk_wmem_alloc);
+	// 메모리 사용량 수정
+
+	skb_set_dst_pending_confirm(skb, READ_ONCE(sk->sk_dst_pending_confirm));
+
+	/* Build TCP header and checksum it. */
+	th = (struct tcphdr *)skb->data;
+	th->source		= inet->inet_sport;
+	th->dest		= inet->inet_dport;
+	th->seq			= htonl(tcb->seq);
+	th->ack_seq		= htonl(rcv_nxt);
+	*(((__be16 *)th) + 6)	= htons(((tcp_header_size >> 2) << 12) |
+					(tcb->tcp_flags & TCPHDR_FLAGS_MASK));
+
+	th->check		= 0;
+	th->urg_ptr		= 0;
+	// tcp 헤더 수정
+	
+	/* The urg_mode check is necessary during a below snd_una win probe */
+	if (unlikely(tcp_urg_mode(tp) && before(tcb->seq, tp->snd_up))) {
+		if (before(tp->snd_up, tcb->seq + 0x10000)) {
+			th->urg_ptr = htons(tp->snd_up - tcb->seq);
+			th->urg = 1;
+		} else if (after(tcb->seq + 0xFFFF, tp->snd_nxt)) {
+			th->urg_ptr = htons(0xFFFF);
+			th->urg = 1;
+		}
+	} //urg 모드 처리, 포인터 설정
+
+	skb_shinfo(skb)->gso_type = sk->sk_gso_type;
+	if (likely(!(tcb->tcp_flags & TCPHDR_SYN))) {
+		th->window      = htons(tcp_select_window(sk));
+		tcp_ecn_send(sk, skb, th, tcp_header_size);
+		// SYN 패킷이 아닌 애들은 swnd보고 window 헤더 설정
+	} else {
+		/* RFC1323: The window in SYN & SYN/ACK segments
+		 * is never scaled.
+		 */
+		th->window	= htons(min(tp->rcv_wnd, 65535U));
+	}
+
+	tcp_options_write(th, tp, NULL, &opts, &key);
+
+	if (tcp_key_is_md5(&key)) {
+#ifdef CONFIG_TCP_MD5SIG
+		/* Calculate the MD5 hash, as we have all we need now */
+		sk_gso_disable(sk);
+		tp->af_specific->calc_md5_hash(opts.hash_location,
+					       key.md5_key, sk, skb);
+#endif
+	} else if (tcp_key_is_ao(&key)) {
+		int err;
+
+		err = tcp_ao_transmit_skb(sk, skb, key.ao_key, th,
+					  opts.hash_location);
+		if (err) {
+			kfree_skb_reason(skb, SKB_DROP_REASON_NOT_SPECIFIED);
+			return -ENOMEM;
+		}
+	} // 그 외 옵션..
+
+	/* BPF prog is the last one writing header option */
+	bpf_skops_write_hdr_opt(sk, skb, NULL, NULL, 0, &opts);
+
+	INDIRECT_CALL_INET(icsk->icsk_af_ops->send_check,
+			   tcp_v6_send_check, tcp_v4_send_check,
+			   sk, skb);
+	// 체크섬 계산
+
+	if (likely(tcb->tcp_flags & TCPHDR_ACK))
+		tcp_event_ack_sent(sk, rcv_nxt);
+
+	if (skb->len != tcp_header_size) {
+		tcp_event_data_sent(tp, sk);
+		tp->data_segs_out += tcp_skb_pcount(skb);
+		tp->bytes_sent += skb->len - tcp_header_size;
+	}
+
+	if (after(tcb->end_seq, tp->snd_nxt) || tcb->seq == tcb->end_seq)
+		TCP_ADD_STATS(sock_net(sk), TCP_MIB_OUTSEGS,
+			      tcp_skb_pcount(skb));
+
+	tp->segs_out += tcp_skb_pcount(skb);
+	skb_set_hash_from_sk(skb, sk);
+	/* OK, its time to fill skb_shinfo(skb)->gso_{segs|size} */
+	skb_shinfo(skb)->gso_segs = tcp_skb_pcount(skb);
+	skb_shinfo(skb)->gso_size = tcp_skb_mss(skb);
+
+	/* Leave earliest departure time in skb->tstamp (skb->skb_mstamp_ns) */
+
+	/* Cleanup our debris for IP stacks */
+	memset(skb->cb, 0, max(sizeof(struct inet_skb_parm),
+			       sizeof(struct inet6_skb_parm)));
+
+	tcp_add_tx_delay(skb, tp);
+
+	err = INDIRECT_CALL_INET(icsk->icsk_af_ops->queue_xmit,
+				 inet6_csk_xmit, ip_queue_xmit,
+				 sk, skb, &inet->cork.fl);
+	// l3로 이동
+
+	if (unlikely(err > 0)) {
+		tcp_enter_cwr(sk);
+		err = net_xmit_eval(err);
+	}
+	if (!err && oskb) {
+		tcp_update_skb_after_send(sk, oskb, prior_wstamp);
+		tcp_rate_skb_sent(sk, oskb);
+	}
+	return err;
+}
+```
+
+### ip_queue_xmit()
+```c
+int ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl)
+{
+	return __ip_queue_xmit(sk, skb, fl, READ_ONCE(inet_sk(sk)->tos)); // ToS 정보 추가해서 다음 함수로로
+}
+```
+
+### \_\_ip_queue_xmit()
+```c
+int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
+		    __u8 tos)
+{
+	struct inet_sock *inet = inet_sk(sk);
+	struct net *net = sock_net(sk);
+	struct ip_options_rcu *inet_opt;
+	struct flowi4 *fl4;
+	struct rtable *rt;
+	struct iphdr *iph;
+	int res;
+
+	/* Skip all of this if the packet is already routed,
+	 * f.e. by something like SCTP.
+	 */
+	rcu_read_lock();
+	inet_opt = rcu_dereference(inet->inet_opt);
+	fl4 = &fl->u.ip4;
+	rt = skb_rtable(skb); // 라우팅 정보 가져옴
+	if (rt) // 라우팅 정보 있는 경우
+		goto packet_routed;
+
+	/* Make sure we can route this packet. */
+	rt = dst_rtable(__sk_dst_check(sk, 0));
+	// 캐시된 라우팅 정보가 유효한지 확인하고 라우팅 테이블을 가져옴
+	if (!rt) { // 라우팅 테이블이 없으면
+		inet_sk_init_flowi4(inet, fl4);
+		// flow 정보가 담겨있는 fl4 변수 초기화
+
+		/* sctp_v4_xmit() uses its own DSCP value */
+		fl4->flowi4_tos = tos & INET_DSCP_MASK;
+
+		/* If this fails, retransmit mechanism of transport layer will
+		 * keep trying until route appears or the connection times
+		 * itself out.
+		 */
+		rt = ip_route_output_flow(net, fl4, sk);
+		// flow 기반으로 라우팅 테이블 조회
+		if (IS_ERR(rt))
+			goto no_route;
+		sk_setup_caps(sk, &rt->dst);
+	}
+	skb_dst_set_noref(skb, &rt->dst);
+	// skb에 dst 설정
+
+packet_routed:
+	if (inet_opt && inet_opt->opt.is_strictroute && rt->rt_uses_gateway)
+		goto no_route;
+
+	/* OK, we know where to send it, allocate and build IP header. */
+	skb_push(skb, sizeof(struct iphdr) + (inet_opt ? inet_opt->opt.optlen : 0));
+	skb_reset_network_header(skb);
+	iph = ip_hdr(skb);
+	// ip 헤더 포인터 설정
+	
+	*((__be16 *)iph) = htons((4 << 12) | (5 << 8) | (tos & 0xff));
+	if (ip_dont_fragment(sk, &rt->dst) && !skb->ignore_df)
+		iph->frag_off = htons(IP_DF);
+	else
+		iph->frag_off = 0;
+	iph->ttl      = ip_select_ttl(inet, &rt->dst);
+	iph->protocol = sk->sk_protocol;
+	ip_copy_addrs(iph, fl4);
+	// 헤더 설정
+
+	/* Transport layer set skb->h.foo itself. */
+
+	if (inet_opt && inet_opt->opt.optlen) {
+		iph->ihl += inet_opt->opt.optlen >> 2;
+		ip_options_build(skb, &inet_opt->opt, inet->inet_daddr, rt);
+	}
+
+	ip_select_ident_segs(net, skb, sk,
+			     skb_shinfo(skb)->gso_segs ?: 1);
+
+	/* TODO : should we use skb->sk here instead of sk ? */
+	skb->priority = READ_ONCE(sk->sk_priority);
+	skb->mark = READ_ONCE(sk->sk_mark);
+
+	res = ip_local_out(net, sk, skb);
+	// 다음 함수 호출
+	rcu_read_unlock();
+	return res;
+
+no_route:
+	rcu_read_unlock();
+	IP_INC_STATS(net, IPSTATS_MIB_OUTNOROUTES);
+	kfree_skb_reason(skb, SKB_DROP_REASON_IP_OUTNOROUTES);
+	return -EHOSTUNREACH;
+}
+```
+
+### ip_local_out()
+```c
+int ip_local_out(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	int err;
+
+	err = __ip_local_out(net, sk, skb);
+	if (likely(err == 1))
+		err = dst_output(net, sk, skb);
+
+	return err;
+}
+```
+
+### \_\_ip_local_out()
+```c
+int __ip_local_out(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	struct iphdr *iph = ip_hdr(skb);
+
+	IP_INC_STATS(net, IPSTATS_MIB_OUTREQUESTS);
+
+	iph_set_totlen(iph, skb->len);
+	// ip 헤더의 총 길이 설정
+	ip_send_check(iph);
+	// 체크섬 계산
+
+	/* if egress device is enslaved to an L3 master device pass the
+	 * skb to its handler for processing
+	 */
+	skb = l3mdev_ip_out(sk, skb);
+	if (unlikely(!skb))
+		return 0;
+
+	skb->protocol = htons(ETH_P_IP);
+
+	return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT,
+		       net, sk, skb, NULL, skb_dst(skb)->dev,
+		       dst_output);
+}
+```
+
+
+### dst_output()
+```c
+static inline int dst_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	return INDIRECT_CALL_INET(READ_ONCE(skb_dst(skb)->output),
+				  ip6_output, ip_output,
+				  net, sk, skb);
+}
+```
+
+
+### ip_output()
+```c
+int ip_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	struct net_device *dev = skb_dst(skb)->dev, *indev = skb->dev; // 
+
+	skb->dev = dev;
+	// skb->dev를 실제 패킷이 나가는 인터페이스로 설정
+	skb->protocol = htons(ETH_P_IP);
+	// 중복..?
+
+	//netfilter postrouting 필터 적용
+	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING,
+			    net, sk, skb, indev, dev,
+			    ip_finish_output,
+			    !(IPCB(skb)->flags & IPSKB_REROUTED));
+}
+```
+
+
+### ip_finish_output()
+```c
+static int ip_finish_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	int ret;
+
+	ret = BPF_CGROUP_RUN_PROG_INET_EGRESS(sk, skb);
+	switch (ret) {
+	case NET_XMIT_SUCCESS:
+		return __ip_finish_output(net, sk, skb);
+	case NET_XMIT_CN:
+		return __ip_finish_output(net, sk, skb) ? : ret;
+	default:
+		kfree_skb_reason(skb, SKB_DROP_REASON_BPF_CGROUP_EGRESS);
+		return ret;
+	}
+} //BPF(eBPF)가 있으면 관련 동작 처리
+```
+
+
+### \_\_ip_finish_output()
+```c
+static int __ip_finish_output(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	unsigned int mtu;
+
+#if defined(CONFIG_NETFILTER) && defined(CONFIG_XFRM)
+	/* Policy lookup after SNAT yielded a new policy */
+	if (skb_dst(skb)->xfrm) { // NAT가 적용된 경우, 재라우팅..
+		IPCB(skb)->flags |= IPSKB_REROUTED;
+		return dst_output(net, sk, skb);
+	}
+#endif
+	mtu = ip_skb_dst_mtu(sk, skb); //mtu 가져옴
+	if (skb_is_gso(skb)) //gso/tso인 경우
+		return ip_finish_output_gso(net, sk, skb, mtu);
+
+	if (skb->len > mtu || IPCB(skb)->frag_max_size) 
+	//mtu보다 skb가 더 커서 fragmentation이 필요한 경우
+		return ip_fragment(net, sk, skb, mtu, ip_finish_output2);
+
+	return ip_finish_output2(net, sk, skb);
+}
+```
+
+
+### ip_finish_output2()
+```c
+static int ip_finish_output2(struct net *net, struct sock *sk, struct sk_buff *skb)
+{
+	struct dst_entry *dst = skb_dst(skb);
+	struct rtable *rt = dst_rtable(dst);
+	struct net_device *dev = dst->dev;
+	unsigned int hh_len = LL_RESERVED_SPACE(dev);
+	struct neighbour *neigh;
+	bool is_v6gw = false;
+
+	if (rt->rt_type == RTN_MULTICAST) {
+		IP_UPD_PO_STATS(net, IPSTATS_MIB_OUTMCAST, skb->len);
+	} else if (rt->rt_type == RTN_BROADCAST)
+		IP_UPD_PO_STATS(net, IPSTATS_MIB_OUTBCAST, skb->len);
+
+	/* OUTOCTETS should be counted after fragment */
+	IP_UPD_PO_STATS(net, IPSTATS_MIB_OUT, skb->len);
+
+	if (unlikely(skb_headroom(skb) < hh_len && dev->header_ops)) {
+		skb = skb_expand_head(skb, hh_len);
+		// headrom이 헤더 공간보다 작으면 확장
+		if (!skb)
+			return -ENOMEM;
+	}
+
+	if (lwtunnel_xmit_redirect(dst->lwtstate)) {
+		int res = lwtunnel_xmit(skb);
+
+		if (res != LWTUNNEL_XMIT_CONTINUE)
+			return res;
+	} // lwt 처리 (vxlan 등)
+
+	rcu_read_lock();
+	neigh = ip_neigh_for_gw(rt, skb, &is_v6gw);
+	// next hop 정보 가져옴(v4면 arp, v6면 ndp)
+	// v6인 경우, is_v6gw = true로 설정
+	
+	if (!IS_ERR(neigh)) {
+		int res;
+
+		sock_confirm_neigh(skb, neigh);
+		// 유효성 검사
+		/* if crossing protocols, can not use the cached header */
+		res = neigh_output(neigh, skb, is_v6gw);
+		rcu_read_unlock();
+		return res;
+	}
+	rcu_read_unlock();
+
+	net_dbg_ratelimited("%s: No header cache and no neighbour!\n",
+			    __func__);
+	kfree_skb_reason(skb, SKB_DROP_REASON_NEIGH_CREATEFAIL);
+	return PTR_ERR(neigh);
+}
+```
+
+
+### neigh_output()
+```c
+static inline int neigh_output(struct neighbour *n, struct sk_buff *skb,
+			       bool skip_cache)
+{
+	const struct hh_cache *hh = &n->hh;
+
+	/* n->nud_state and hh->hh_len could be changed under us.
+	 * neigh_hh_output() is taking care of the race later.
+	 */
+	if (!skip_cache &&
+	    (READ_ONCE(n->nud_state) & NUD_CONNECTED) &&
+	    READ_ONCE(hh->hh_len))
+	    // skip_cache가 꺼져있고 next hop 정보가 유효한 경우,
+	    // v6인 경우 skip
+		return neigh_hh_output(hh, skb);
+
+	return READ_ONCE(n->output)(n, skb);
+}
+```
+
+
+### neigh_hh_output()
+```c
+static inline int neigh_hh_output(const struct hh_cache *hh, struct sk_buff *skb)
+{
+	unsigned int hh_alen = 0;
+	unsigned int seq;
+	unsigned int hh_len;
+
+	do { //seqlock 동작
+		seq = read_seqbegin(&hh->hh_lock);
+		hh_len = READ_ONCE(hh->hh_len);
+		if (likely(hh_len <= HH_DATA_MOD)) {
+		//헤더 길이가 유효하다면
+			hh_alen = HH_DATA_MOD;
+			//헤더 길이 수정
+
+			/* skb_push() would proceed silently if we have room for
+			 * the unaligned size but not for the aligned size:
+			 * check headroom explicitly.
+			 */
+			if (likely(skb_headroom(skb) >= HH_DATA_MOD)) {
+				/* this is inlined by gcc */
+				memcpy(skb->data - HH_DATA_MOD, hh->hh_data,
+				       HH_DATA_MOD);
+				       
+				// headrom의 크기가 충분하다면 데이터 복사
+			}
+		} else {
+			hh_alen = HH_DATA_ALIGN(hh_len);
+			//헤더 길이 조정
+			if (likely(skb_headroom(skb) >= hh_alen)) {
+				memcpy(skb->data - hh_alen, hh->hh_data,
+				       hh_alen);
+				// 데이터 복사
+			}
+		}
+	} while (read_seqretry(&hh->hh_lock, seq));
+
+	if (WARN_ON_ONCE(skb_headroom(skb) < hh_alen)) {
+		kfree_skb(skb);
+		// headroom 크기가 충분하지 않으면 드랍
+		return NET_XMIT_DROP;
+	}
+
+	__skb_push(skb, hh_len);
+	return dev_queue_xmit(skb);
+}
+```
+
+
+### dev_queue_xmit()
+```c
+static inline int dev_queue_xmit(struct sk_buff *skb)
+{
+	return __dev_queue_xmit(skb, NULL);
+}
+```
+
+
+### \_\_dev_queue_xmit()
+```c
+/**
+ * __dev_queue_xmit() - transmit a buffer
+ * @skb:	buffer to transmit
+ * @sb_dev:	suboordinate device used for L2 forwarding offload
+ *
+ * Queue a buffer for transmission to a network device. The caller must
+ * have set the device and priority and built the buffer before calling
+ * this function. The function can be called from an interrupt.
+ *
+ * When calling this method, interrupts MUST be enabled. This is because
+ * the BH enable code must have IRQs enabled so that it will not deadlock.
+ *
+ * Regardless of the return value, the skb is consumed, so it is currently
+ * difficult to retry a send to this method. (You can bump the ref count
+ * before sending to hold a reference for retry if you are careful.)
+ *
+ * Return:
+ * * 0				- buffer successfully transmitted
+ * * positive qdisc return code	- NET_XMIT_DROP etc.
+ * * negative errno		- other errors
+ */
+int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
+{
+	struct net_device *dev = skb->dev;
+	struct netdev_queue *txq = NULL;
+	struct Qdisc *q;
+	int rc = -ENOMEM;
+	bool again = false;
+
+	skb_reset_mac_header(skb);
+	skb_assert_len(skb);
+	//mac 헤더 초기화
+
+	if (unlikely(skb_shinfo(skb)->tx_flags & SKBTX_SCHED_TSTAMP))
+		__skb_tstamp_tx(skb, NULL, NULL, skb->sk, SCM_TSTAMP_SCHED);
+
+	/* Disable soft irqs for various locks below. Also
+	 * stops preemption for RCU.
+	 */
+	rcu_read_lock_bh();
+	// lock 획득 및 softirq 비활성화
+
+	skb_update_prio(skb);
+
+	qdisc_pkt_len_init(skb);
+#ifdef CONFIG_NET_CLS_ACT
+	skb->tc_at_ingress = 0;
+#endif
+#ifdef CONFIG_NET_EGRESS
+	if (static_branch_unlikely(&egress_needed_key)) {
+		if (nf_hook_egress_active()) {
+			skb = nf_hook_egress(skb, &rc, dev);
+			if (!skb)
+				goto out;
+		} //netfilter egress hook 처리
+
+		netdev_xmit_skip_txqueue(false);
+
+		nf_skip_egress(skb, true);
+		skb = sch_handle_egress(skb, &rc, dev);
+		//qdisc 핸들러 호출
+		if (!skb)
+			goto out;
+		nf_skip_egress(skb, false);
+
+		if (netdev_xmit_txqueue_skipped())
+			txq = netdev_tx_queue_mapping(dev, skb);
+			// 패킷이 나갈 tx queue 결정
+	}
+#endif
+	/* If device/qdisc don't need skb->dst, release it right now while
+	 * its hot in this cpu cache.
+	 */
+	if (dev->priv_flags & IFF_XMIT_DST_RELEASE)
+		skb_dst_drop(skb);
+	else
+		skb_dst_force(skb);
+
+	if (!txq)
+		txq = netdev_core_pick_tx(dev, skb, sb_dev);
+			// tx queue가 설정되어 있지 않다면 xps로 나갈 큐 결정
+
+	q = rcu_dereference_bh(txq->qdisc);
+	
+	trace_net_dev_queue(skb);
+	if (q->enqueue) {
+		rc = __dev_xmit_skb(skb, q, dev, txq);
+		goto out;
+	}
+
+// 가상 장치인 경우, 처리리
+	/* The device has no queue. Common case for software devices:
+	 * loopback, all the sorts of tunnels...
+
+	 * Really, it is unlikely that netif_tx_lock protection is necessary
+	 * here.  (f.e. loopback and IP tunnels are clean ignoring statistics
+	 * counters.)
+	 * However, it is possible, that they rely on protection
+	 * made by us here.
+
+	 * Check this and shot the lock. It is not prone from deadlocks.
+	 *Either shot noqueue qdisc, it is even simpler 8)
+	 */
+	if (dev->flags & IFF_UP) {
+		int cpu = smp_processor_id(); /* ok because BHs are off */
+
+		/* Other cpus might concurrently change txq->xmit_lock_owner
+		 * to -1 or to their cpu id, but not to our id.
+		 */
+		if (READ_ONCE(txq->xmit_lock_owner) != cpu) {
+			if (dev_xmit_recursion())
+				goto recursion_alert;
+
+			skb = validate_xmit_skb(skb, dev, &again);
+			if (!skb)
+				goto out;
+
+			HARD_TX_LOCK(dev, txq, cpu);
+
+			if (!netif_xmit_stopped(txq)) {
+				dev_xmit_recursion_inc();
+				skb = dev_hard_start_xmit(skb, dev, txq, &rc);
+				dev_xmit_recursion_dec();
+				if (dev_xmit_complete(rc)) {
+					HARD_TX_UNLOCK(dev, txq);
+					goto out;
+				}
+			}
+			HARD_TX_UNLOCK(dev, txq);
+			net_crit_ratelimited("Virtual device %s asks to queue packet!\n",
+					     dev->name);
+		} else {
+			/* Recursion is detected! It is possible,
+			 * unfortunately
+			 */
+recursion_alert:
+			net_crit_ratelimited("Dead loop on virtual device %s, fix it urgently!\n",
+					     dev->name);
+		}
+	}
+
+	rc = -ENETDOWN;
+	rcu_read_unlock_bh();
+
+	dev_core_stats_tx_dropped_inc(dev);
+	kfree_skb_list(skb);
+	return rc;
+out:
+	rcu_read_unlock_bh();
+	return rc;
+}
+```
+
+
+### \_\_dev_xmit_skb()
+```c
+static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
+				 struct net_device *dev,
+				 struct netdev_queue *txq)
+{
+	spinlock_t *root_lock = qdisc_lock(q);
+	struct sk_buff *to_free = NULL;
+	bool contended;
+	int rc;
+
+	qdisc_calculate_pkt_len(skb, q);
+
+	if (q->flags & TCQ_F_NOLOCK) {
+	//qdisc 처리 시작
+		if (q->flags & TCQ_F_CAN_BYPASS && nolock_qdisc_is_empty(q) &&
+		    qdisc_run_begin(q)) {
+		    // qdisc bypass가 켜져있고, qdisc가 비어있고 queue에 접근할 수 있다면,
+			/* Retest nolock_qdisc_is_empty() within the protection
+			 * of q->seqlock to protect from racing with requeuing.
+			 */
+			if (unlikely(!nolock_qdisc_is_empty(q))) {
+				rc = dev_qdisc_enqueue(skb, q, &to_free, txq);
+				__qdisc_run(q);
+				qdisc_run_end(q);
+
+				goto no_lock_out;
+			} //queue가 비어있지 않다면 enqueue하고 qdisc 실행
+
+			qdisc_bstats_cpu_update(q, skb);
+			if (sch료
+		return rc;
+	}
+
+	/*
+	 * Heuristic to force contended enqueues to serialize on a
+	 * separate lock before trying to get qdisc main lock.
+	 * This permits qdisc->running owner to get the lock more
+	 * often and dequeue packets faster.
+	 * On PREEMPT_RT it is possible to preempt the qdisc owner during xmit
+	 * and then other tasks will only enqueue packets. The packets will be
+	 * sent after the qdisc owner is scheduled again. To prevent this
+	 * scenario the task always serialize on the lock.
+	 */
+	contended = qdisc_is_running(q) || IS_ENABLED(CONFIG_PREEMPT_RT);
+	if (unlikely(contended))
+		spin_lock(&q->busylock);
+
+	spin_lock(root_lock);
+	if (unlikely(test_bit(__QDISC_STATE_DEACTIVATED, &q->state))) {
+		__qdisc_drop(skb, &to_free);
+		rc = NET_XMIT_DROP;
+	} else if ((q->flags & TCQ_F_CAN_BYPASS) && !qdisc_qlen(q) &&
+		   qdisc_run_begin(q)) {
+		/*
+		 * This is a work-conserving queue; there are no old skbs
+		 * waiting to be sent out; and the qdisc is not running -
+		 * xmit the skb directly.
+		 */
+
+		qdisc_bstats_update(q, skb);
+
+		if (sch_direct_xmit(skb, q, dev, txq, root_lock, true)) {
+			if (unlikely(contended)) {
+				spin_unlock(&q->busylock);
+				contended = false;
+			}
+			__qdisc_run(q);
+		}
+
+		qdisc_run_end(q);
+		rc = NET_XMIT_SUCCESS;
+	} else {
+		rc = dev_qdisc_enqueue(skb, q, &to_free, txq);
+		if (qdisc_run_begin(q)) {
+			if (unlikely(contended)) {
+				spin_unlock(&q->busylock);
+				contended = false;
+			}
+			__qdisc_run(q);
+			qdisc_run_end(q);
+		}
+	}
+	spin_unlock(root_lock);
+	if (unlikely(to_free))
+		kfree_skb_list_reason(to_free, SKB_DROP_REASON_QDISC_DROP);
+	if (unlikely(contended))
+		spin_unlock(&q->busylock);
+	return rc;
+}
+```
+

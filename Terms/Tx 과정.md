@@ -848,7 +848,6 @@ static bool tcp_write_xmit(struct sock *sk, unsigned int mss_now, int nonagle,
 
 		if (tcp_pacing_check(sk))
 			break;
-		// 페이싱 체크
 
 		cwnd_quota = tcp_cwnd_test(tp);
 		if (!cwnd_quota) {

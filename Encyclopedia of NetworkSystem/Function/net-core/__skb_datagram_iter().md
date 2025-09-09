@@ -87,3 +87,5 @@ short_copy:
 ```
 
 >`copy_from_iter`, `copy_page_from_iter`, `skb_copy_datagram_from_iter`의 함수들을 통해 각각 skb, frags, frag list에서 데이터를 복사해가는 모습을 볼 수 있다. 또한 frag list 에서 다시 재귀적으로 `skb_copy_datagram_iter()`를 호출하는 것을 볼 수 있었다.
+
+[[simple_copy_to_iter()]]

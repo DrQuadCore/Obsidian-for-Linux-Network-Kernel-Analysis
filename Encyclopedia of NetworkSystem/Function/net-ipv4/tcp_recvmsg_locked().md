@@ -24,6 +24,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 	}
 	timeo = sock_rcvtimeo(sk, flags & MSG_DONTWAIT);
 
+	// 긴급한 데이터는 특별히 처리
 	/* Urgent data needs to be handled specially. */
 	if (flags & MSG_OOB)
 		goto recv_urg;
@@ -49,7 +50,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 		seq = &peek_seq;
 	}
 
-	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len);
+	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len); // 수신받을 길이 설정
 
 	do {
 		u32 offset;
@@ -66,7 +67,8 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 
 		/* Next get a buffer. */
 
-		last = skb_peek_tail(&sk->sk_receive_queue);
+		last = skb_peek_tail(&sk->sk_receive_queue); // 수신 큐의 마지막 패킷
+		 // 수신 큐 반복
 		skb_queue_walk(&sk->sk_receive_queue, skb) {
 			last = skb;
 			/* Now that we have two receive queues this
@@ -84,7 +86,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 				offset--;
 			}
 			if (offset < skb->len)
-				goto found_ok_skb;
+				goto found_ok_skb; // 정상적인 소켓일 시 처리리
 			if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)
 				goto found_fin_ok;
 			WARN(!(flags & MSG_PEEK),

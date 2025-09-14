@@ -76,4 +76,4 @@ SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, ubuf, size_t, size,
 > `sockfd_lookup_light()` 함수로 주어진 fd에 매핑된 소켓(`socket`)을 찾고, 이 소켓에서 패킷을 가져오는 함수 `sock_recvmsg()`로 소켓과, msghdr를 전달한다.
 > 만약 송신자의 주소가 `recv()` 시스템 콜에서 주어졌다면 `move_addr_to_user()` 함수로 주소를 유저 영역으로 전달한다.
 
-
+[[sock_recvmsg()]]

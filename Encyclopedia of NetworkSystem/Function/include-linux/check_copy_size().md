@@ -30,6 +30,6 @@ check_copy_size(const void *addr, size_t bytes, bool is_source)
 }
 ```
 
-- `__builtin_object_size()`로 addr의 크기를 가져와 bytes와 비교한 후 addr이 작다면 false를 반환
+- `__builtin_object_size()`로 컴파일 타임에 크기를 알 수 있다면 addr의 크기를 가져와 bytes와 비교한 후 addr이 작다면 false를 반환
 - copy할 바이트 수가 int값의 범위를 넘어간다면 false 반환
-- 아니면 `check_object_size()`로 ???
+- 아니면 `check_object_size()`로 런타임에 addr의 경계를 검사

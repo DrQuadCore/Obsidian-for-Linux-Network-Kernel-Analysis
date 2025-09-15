@@ -29,7 +29,7 @@ int __sys_recvfrom(int fd, void __user *ubuf, size_t size, unsigned int flags,
 	};
 	struct socket *sock;
 	int err, err2;
-	int fput_needed;
+	int fput_needed;  // 파일 참조 카운트 변경이 필요한지 여부
 	
 	// 유저 영역의 버퍼 ubuf를 커널의 msg.msg_iter로 가져오기
 	err = import_ubuf(ITER_DEST, ubuf, size, &msg.msg_iter);
@@ -67,13 +67,26 @@ SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, ubuf, size_t, size,
 	return __sys_recvfrom(fd, ubuf, size, flags, addr, addr_len);
 }
 
+/*
+ *	Receive a datagram from a socket.
+ */
+
+SYSCALL_DEFINE4(recv, int, fd, void __user *, ubuf, size_t, size,
+		unsigned int, flags)
+{
+	return __sys_recvfrom(fd, ubuf, size, flags, NULL, NULL);
+}
+
 ```
 - `__user`: 유저 공간의 메모리 주소임을 나타냄.
-- 논블로킹(`O_NONBLOCK`):
+- 논블로킹(`O_NONBLOCK`): 접근 시 현재 사용 불가능할 때 기다리지 않고 바로 다음 진행. flags에 `MSG_DONTWAIT` 플래그를 킴
 
-> 전달받은 패킷을 관리하는 `msghdr` 구조체를 만든다.
-> 유저 영역의 메모리 공간에 있는 버퍼를 커널로 가져오고, `msg.msg_iter`에 저장한다.
-> `sockfd_lookup_light()` 함수로 주어진 fd에 매핑된 소켓(`socket`)을 찾고, 이 소켓에서 패킷을 가져오는 함수 `sock_recvmsg()`로 소켓과, msghdr를 전달한다.
-> 만약 송신자의 주소가 `recv()` 시스템 콜에서 주어졌다면 `move_addr_to_user()` 함수로 주소를 유저 영역으로 전달한다.
+> 1. 전달받은 패킷을 관리하는 `msghdr` 구조체를 만든다.
+> 2. 유저 영역의 메모리 공간에 있는 버퍼를 커널로 가져오고, `msg.msg_iter`에 저장한다.
+> 3. `sockfd_lookup_light()` 함수로 주어진 fd에 매핑된 소켓(`socket`)을 찾고, 이 소켓에서 패킷을 가져오는 함수 `sock_recvmsg()`로 소켓과, msghdr를 전달한다.
+> 4. 만약 송신자의 주소가 `recv()` 시스템 콜에서 주어졌다면 `move_addr_to_user()` 함수로 주소를 유저 영역으로 전달한다.
 
+import_ubuf()
+sockfd_lookup_light()
 [[sock_recvmsg()]]
+move_addr_to_user()

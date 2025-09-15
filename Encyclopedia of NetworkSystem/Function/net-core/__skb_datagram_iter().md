@@ -8,6 +8,7 @@ static int __skb_datagram_iter(const struct sk_buff *skb, int offset,
 	int i, copy = start - offset, start_off = offset, n;
 	struct sk_buff *frag_iter;
 
+	// a. linear 영역 데이터 복사하기
 	/* Copy header. */
 	if (copy > 0) {
 		if (copy > len)
@@ -20,7 +21,8 @@ static int __skb_datagram_iter(const struct sk_buff *skb, int offset,
 		if ((len -= copy) == 0)
 			return 0;
 	}
-
+	
+	// b. skb_frag_t 복사하기
 	/* Copy paged appendix. Hmm... why does this look so complicated? */
 	for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
 		int end;
@@ -48,6 +50,7 @@ static int __skb_datagram_iter(const struct sk_buff *skb, int offset,
 		start = end;
 	}
 
+	// c. frag_list 순회하면서 추가 sk_buff 복사하기
 	skb_walk_frags(skb, frag_iter) {
 		int end;
 
@@ -86,6 +89,15 @@ short_copy:
 }
 ```
 
->`copy_from_iter`, `copy_page_from_iter`, `skb_copy_datagram_from_iter`의 함수들을 통해 각각 skb, frags, frag list에서 데이터를 복사해가는 모습을 볼 수 있다. 또한 frag list 에서 다시 재귀적으로 `skb_copy_datagram_iter()`를 호출하는 것을 볼 수 있었다.
+>**a. 헤더 복사하기**
+>skb->data의 데이터를 offset 이후부터 복사하여 `skb_headlen() - offset` 만큼만 복사한다.
+>복사한 데이터만큼 offset, len을 변경한다.
+
+> **b. skb_frag_t 복사하기**
+> skb->skb_shard_info의 배열을 for문을 통해 순회하면서 각 page를 복사한다.
+> 물리적 공간에 있는 `struct page *`를 가상 메모리 주소에 매핑하는 함수 `kmap()`로 가상 메리 주소를 구하고 복사를 수행한다.
+
+> **c. frag_list 순회하면서 추가 sk_buff 복사하기**
+> sk_buff에 추가적으로 연결된 다른 sk_buff를 재귀적으로 호출하여 복사한다.
 
 [[simple_copy_to_iter()]]

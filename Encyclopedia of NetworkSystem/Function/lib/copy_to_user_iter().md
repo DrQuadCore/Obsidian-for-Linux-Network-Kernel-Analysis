@@ -26,6 +26,7 @@ size_t copy_to_user_iter(void __user *iter_to, size_t progress,
 }
 ```
 
+> `access_ok()` 함수로 해당 주소가 유저 영역에서 유효한지 검사 후 `raw_copy_to_user()`로 메모리에 접근하여 복사 수행
 ---
 ### raw_copy_to_user()
 **/include/asm-generic/uaccess.h**

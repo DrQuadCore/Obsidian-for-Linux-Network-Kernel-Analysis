@@ -21,7 +21,6 @@ size_t iterate_ubuf(struct iov_iter *iter, size_t len, void *priv, void *priv2,
 - progress: 데이터 카피가 완료된 바이트 수
 - iter->iov_offset: 다음 데이터 카피를 시작할 ubuf 내의 오프셋
 
-> 데이터 카피를 할 유저 영역의 메모리 주소 시작점을 계산하고, `step`에 저장된 함수를 실행한다. (`copy_to_user_iter()`)
-> 
+> 데이터 카피를 할 유저 영역의 메모리 주소 시작점을 계산하고, `step`에 저장된 함수(`copy_to_user_iter()`)를 실행한다. iov_iter->iov_offset과 count를 업데이트한다.
 
 [[copy_to_user_iter()]]

@@ -62,6 +62,7 @@ size_t iterate_and_advance2(struct iov_iter *iter, size_t len, void *priv,
 ```
 
 >이전 함수에서 priv2 = NULL인 상태로 실행되었다.
-> 반복할 크기가 iter의 크기
+> 반복할 크기(`len`) = iov_iter에서 처리할 남은 바이트 수(`iter->count`)
 > iter->iter_type에 따라서 적절한 함수를 실행한다. 
 
+[[iterate_ubuf()]]

@@ -27,5 +27,6 @@ int sock_recvmsg(struct socket *sock, struct msghdr *msg, int flags)
 EXPORT_SYMBOL(sock_recvmsg);
 ```
 
-먼저 `security_socket_recvmsg()`함수를 호출해 수신받은 메시지의 권한을 확인한다.
-권한이 있다면(`err==0`) [[sock_recvmsg_nosec()]]을 실행한다.
+먼저 `security_socket_recvmsg()`함수를 호출해 수신받은 메시지의 권한을 확인하고 보안 검사를 한다.
+정상적이라면(`err==0`) [[sock_recvmsg_nosec()]]을 실행한다.
+

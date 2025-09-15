@@ -37,7 +37,7 @@ EXPORT_SYMBOL(_copy_to_iter);
 ```
 
 - iov_iter->data_source가 true라면 0 반환
-- iov_iter->iter_type이 ITER_UBUF이거나 ITER_IOVEC이라면 ???
+- iov_iter->iter_type이 ITER_UBUF이거나 ITER_IOVEC이라면 `might_fault()`로 페이지 폴트 준비
 ```c title=user_backed_iter()
   static inline bool user_backed_iter(const struct iov_iter *i)
 {

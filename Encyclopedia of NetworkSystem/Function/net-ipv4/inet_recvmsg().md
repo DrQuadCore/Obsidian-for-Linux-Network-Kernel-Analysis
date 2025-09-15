@@ -37,12 +37,12 @@ EXPORT_SYMBOL(inet_recvmsg);
 ```
 #define MSG_ERRQUEUE	0x2000	/* Fetch message from error queue */
 ```
-`sock_rps_record_flow()`함수로 진행
+소켓이 소켓 오류 큐에서 오류를 받아오지 않는다면, `sock_rps_record_flow()`함수로 이 플로우가 현재 CPU에서 진행되고 있음을 기록
 
 **b. 다음 레이어로 이동**
  - `sock` 구조체 내부에는 소켓 계층에서 Transport 계층으로의 프로토콜을 정의한 `proto` 구조체를 가지고 있다. 정확히는  `(struct sock *)sk->(struct sock_common)__sk_common.(struct proto *)skc_prot` 형태로 참조한다.
 	 - [[tcp_recvmsg()]]
- - `INDIRECT_CALL_2` 매크로로 tcp인지, udp인지에 따라 상응하는 다음 함수를 실행하고, 정상적으로 종료되었다면 전달받은 `addr_len` 정수값을 `msghdr` 구조체에 기록한다.
+ - `INDIRECT_CALL_2` 매크로로 tcp인지, udp인지에 따라 대응하는 함수를 실행하고, 정상적으로 종료되었다면 전달받은 `addr_len` 정수값을 `msghdr` 구조체에 기록한다.
  
 ```c
 /**

@@ -13,7 +13,7 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 		int *addr_len)
 {
 	int cmsg_flags = 0, ret;
-	struct scm_timestamping_internal tss;
+	struct scm_timestamping_internal tss; // 타임스탬프 정보
 
 	if (unlikely(flags & MSG_ERRQUEUE))
 		return inet_recv_error(sk, msg, len, addr_len);
@@ -41,7 +41,10 @@ int tcp_recvmsg(struct sock *sk, struct msghdr *msg, size_t len, int flags,
 }
 ```
 
-> `lock_sock()`함수를 통해 해당 소켓의 락을 획득하고, [[tcp_recvmsg_locked()]]를 호출하게 된다. 그리고 소켓 락을 해제한다. 여기서 나온 결과를 그대로 return 하게 된다.
+> 1. 일반적인 데이터 수신이 아닌 에러 큐를 읽는 경우 `inet_recv_error()` 실행
+> 2. busy_loop가 가능하다면 busy pooling 실행 
+ >3. `lock_sock()`함수를 통해 해당 소켓의 락을 획득하고, [[tcp_recvmsg_locked()]]를 호출하게 된다. 그리고 소켓 락을 해제한다. 여기서 나온 결과를 그대로 return 하게 된다.
+ >4. 타임스탬프 요청했으면 `tcp_recv_timestamp()` 함수로 전달, 제어메시지(CMSG) 요청했으면 tcp_inq_hint()로 receive_queue에 남은 바이트 수 계산 후 put_cmsg로 전달
 
 [[tcp_recvmsg_locked()]]
 [[release_sock()]]

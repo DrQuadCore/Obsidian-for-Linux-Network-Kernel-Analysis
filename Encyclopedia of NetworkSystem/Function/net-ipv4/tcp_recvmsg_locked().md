@@ -50,7 +50,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 		seq = &peek_seq;
 	}
 
-	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len); // 수신받을 길이 설정
+	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len); // 최소로 읽을 바이트 수수 설정
 
 	do {
 		u32 offset;
@@ -79,14 +79,16 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 				 *seq, TCP_SKB_CB(skb)->seq, tp->rcv_nxt,
 				 flags))
 				break;
-
+			
+			// offset: sk_buff 내에서 읽기 시작할 위치
 			offset = *seq - TCP_SKB_CB(skb)->seq;
+			// TCP 플래그 처리리
 			if (unlikely(TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)) {
 				pr_err_once("%s: found a SYN, please report !\n", __func__);
 				offset--;
 			}
 			if (offset < skb->len)
-				goto found_ok_skb; // 정상적인 소켓일 시 처리리
+				goto found_ok_skb; // 정상적인 소켓일 시 처리
 			if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN)
 				goto found_fin_ok;
 			WARN(!(flags & MSG_PEEK),
@@ -136,11 +138,12 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 				break;
 			}
 		}
-
+		
+		// 최소 바이트 이상 수신 시 백로그에 있는 패킷 처리
 		if (copied >= target) {
 			/* Do not sleep, just process backlog. */
 			__sk_flush_backlog(sk);
-		} else {
+		} else { // 최소 바이트 미달성 시 윈도우 업데이트 후 기다림
 			tcp_cleanup_rbuf(sk, copied);
 			err = sk_wait_data(sk, &timeo, last);
 			if (err < 0) {
@@ -253,7 +256,7 @@ recv_sndq:
 > 
 > 그 후 만약 수신 큐에서 모두 복사가 완료되어 `copied >= target`이라면 백로그를 처리하지 않고 `break`가 된다. 그 외에도 `sk->sk_shutdown`을 `RCV_SHUTDOWN`과 비트 & 연산을 하여 종료 조건을 확인한다.
 > 
-> 이후 다시 `copied >= target`이라면 `__sk_flush_backlog()`함수를 호출하여 백로그를 처리하게 된다. 만약 위의 조건을 만족하지 않는다면 `tcp_cleanup_rbuf()`함수를 호출하여 수신 큐를 정리하고, `sk_wait_data()`함수를 시행하게 된다.
+> 이후 다시 `copied >= target`이라면 `__sk_flush_backlog()`함수를 호출하여 백로그를 처리하게 된다. 만약 위의 조건을 만족하지 않는다면 `tcp_cleanup_rbuf()`함수를 호출하여 수신 큐를 정리하고, `sk_wait_data()`함수를 시행하여 새 데이터가 sk_receive_queue에 올 때까지 기다리게 된다.
 > 
 > 
 > `found_ok_skb:`

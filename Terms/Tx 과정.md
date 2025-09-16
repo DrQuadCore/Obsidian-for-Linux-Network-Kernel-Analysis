@@ -982,7 +982,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 	skb_set_delivery_time(skb, tp->tcp_wstamp_ns, SKB_CLOCK_MONOTONIC);
 	// 타임스탬프 관련
 	
-	if (clone_it) { // clone_it이 1인 경우 skb 복제
+	if (clone_it) { // clone_it이 1인 경우 skb 복제 (추후 재전송을 위해 복제)
 		oskb = skb;
 
 		tcp_skb_tsorted_save(oskb) {
@@ -1041,6 +1041,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 	skb->ooo_okay = sk_wmem_alloc_get(sk) < SKB_TRUESIZE(1) ||
 			tcp_rtx_queue_empty(sk);
 	// write buffer와 retransmission queue가 비어있는 경우에만 xps 허용
+	// order가 꼬이는 것을 방지지
 
 	/* If we had to use memory reserve to allocate this skb,
 	 * this might cause drops if packet is looped back :
@@ -1203,7 +1204,7 @@ int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
 
 	/* Make sure we can route this packet. */
 	rt = dst_rtable(__sk_dst_check(sk, 0));
-	// 캐시된 라우팅 정보가 유효한지 확인하고 라우팅 테이블을 가져옴
+	// 라우팅 정보가 유효한지 확인하고 라우팅 테이블을 가져옴
 	if (!rt) { // 라우팅 테이블이 없으면
 		inet_sk_init_flowi4(inet, fl4);
 		// flow 정보가 담겨있는 fl4 변수 초기화
@@ -1715,9 +1716,28 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 				goto no_lock_out;
 			} //queue가 비어있지 않다면 enqueue하고 qdisc 실행
 
-			qdisc_bstats_cpu_update(q, skb);
-			if (sch료
+			qdisc_bstats_cpu_update(q, skb);  
+			if (sch_direct_xmit(skb, q, dev, txq, NULL, true) &&
+			    !nolock_qdisc_is_empty(q))
+				__qdisc_run(q);
+
+			qdisc_run_end(q);
+			return NET_XMIT_SUCCESS;
+		}
+
+		rc = dev_qdisc_enqueue(skb, q, &to_free, txq);
+		qdisc_run(q);
+
+no_lock_out:
+		if (unlikely(to_free))
+			kfree_skb_list_reason(to_free,
+					      tcf_get_drop_reason(to_free));
 		return rc;
+	}
+
+	if (unlikely(READ_ONCE(q->owner) == smp_processor_id())) {
+		kfree_skb_reason(skb, SKB_DROP_REASON_TC_RECLASSIFY_LOOP);
+		return NET_XMIT_DROP;
 	}
 
 	/*
@@ -1777,4 +1797,538 @@ static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 	return rc;
 }
 ```
+
+
+### \_\_qdisc_run()
+```c
+void __qdisc_run(struct Qdisc *q)
+{
+	int quota = READ_ONCE(net_hotdata.dev_tx_weight); //쿼터 지정
+	int packets;
+
+	while (qdisc_restart(q, &packets)) {
+		quota -= packets;
+		if (quota <= 0) { // 쿼터 소진시 softirq 스케쥴링
+			if (q->flags & TCQ_F_NOLOCK)
+				set_bit(__QDISC_STATE_MISSED, &q->state);
+			else
+				__netif_schedule(q);
+
+			break;
+		}
+	}
+}
+```
+
+
+### qdisc_restart()
+```c
+/*
+ * NOTE: Called under qdisc_lock(q) with locally disabled BH.
+ *
+ * running seqcount guarantees only one CPU can process
+ * this qdisc at a time. qdisc_lock(q) serializes queue accesses for
+ * this queue.
+ *
+ *  netif_tx_lock serializes accesses to device driver.
+ *
+ *  qdisc_lock(q) and netif_tx_lock are mutually exclusive,
+ *  if one is grabbed, another must be free.
+ *
+ * Note, that this procedure can be called by a watchdog timer
+ *
+ * Returns to the caller:
+ *				0  - queue is empty or throttled.
+ *				>0 - queue is not empty.
+ *
+ */
+static inline bool qdisc_restart(struct Qdisc *q, int *packets)
+{
+	spinlock_t *root_lock = NULL;
+	struct netdev_queue *txq;
+	struct net_device *dev;
+	struct sk_buff *skb;
+	bool validate;
+
+	/* Dequeue packet */
+	skb = dequeue_skb(q, &validate, packets); // 패킷 가져옴
+	if (unlikely(!skb))
+		return false;
+
+	if (!(q->flags & TCQ_F_NOLOCK))
+		root_lock = qdisc_lock(q);
+
+	dev = qdisc_dev(q); // 패킷이 전송될 device
+	txq = skb_get_tx_queue(dev, skb); // txq 가져옴
+
+	return sch_direct_xmit(skb, q, dev, txq, root_lock, validate);
+}
+```
+
+
+### sch_direct_xmit()
+```c
+/*
+ * Transmit possibly several skbs, and handle the return status as
+ * required. Owning qdisc running bit guarantees that only one CPU
+ * can execute this function.
+ *
+ * Returns to the caller:
+ *				false  - hardware queue frozen backoff
+ *				true   - feel free to send more pkts
+ */
+bool sch_direct_xmit(struct sk_buff *skb, struct Qdisc *q,
+		     struct net_device *dev, struct netdev_queue *txq,
+		     spinlock_t *root_lock, bool validate)
+{
+	int ret = NETDEV_TX_BUSY;
+	bool again = false;
+
+	/* And release qdisc */
+	if (root_lock)
+		spin_unlock(root_lock);
+
+	/* Note that we validate skb (GSO, checksum, ...) outside of locks */
+	if (validate)
+		skb = validate_xmit_skb_list(skb, dev, &again);
+
+#ifdef CONFIG_XFRM_OFFLOAD
+	if (unlikely(again)) {
+		if (root_lock)
+			spin_lock(root_lock);
+
+		dev_requeue_skb(skb, q);
+		return false;
+	}
+#endif
+
+	if (likely(skb)) { // skb가 유효한 경우,
+		HARD_TX_LOCK(dev, txq, smp_processor_id()); // 락 획득
+		if (!netif_xmit_frozen_or_stopped(txq)) // tx큐가 멈춰있는지 확인
+			skb = dev_hard_start_xmit(skb, dev, txq, &ret);
+		else
+			qdisc_maybe_clear_missed(q, txq);
+
+		HARD_TX_UNLOCK(dev, txq);
+	} else {
+		if (root_lock)
+			spin_lock(root_lock);
+		return true;
+	}
+
+	if (root_lock)
+		spin_lock(root_lock);
+
+	if (!dev_xmit_complete(ret)) {
+		/* Driver returned NETDEV_TX_BUSY - requeue skb */
+		if (unlikely(ret != NETDEV_TX_BUSY))
+			net_warn_ratelimited("BUG %s code %d qlen %d\n",
+					     dev->name, ret, q->q.qlen);
+
+		dev_requeue_skb(skb, q);
+		return false;
+	}
+
+	return true;
+}
+```
+
+
+### dev_hard_start_xmit()
+```c
+struct sk_buff *dev_hard_start_xmit(struct sk_buff *first, struct net_device *dev,
+				    struct netdev_queue *txq, int *ret)
+{
+	struct sk_buff *skb = first;
+	int rc = NETDEV_TX_OK;
+
+	while (skb) {
+		struct sk_buff *next = skb->next;
+
+		skb_mark_not_on_list(skb);
+		rc = xmit_one(skb, dev, txq, next != NULL); // skb 전송
+		if (unlikely(!dev_xmit_complete(rc))) { // 전송 실패
+			skb->next = next;
+			goto out;
+		}
+
+		skb = next; // 다음 skb로 설정
+		if (netif_tx_queue_stopped(txq) && skb) {
+			rc = NETDEV_TX_BUSY;
+			break;
+		}
+	}
+
+out:
+	*ret = rc;
+	return skb;
+}
+```
+
+
+### xmit_one()
+```c
+static int xmit_one(struct sk_buff *skb, struct net_device *dev,
+		    struct netdev_queue *txq, bool more)
+{
+	unsigned int len;
+	int rc;
+
+	if (dev_nit_active_rcu(dev)) // 모니터링 여부
+		dev_queue_xmit_nit(skb, dev);
+
+	len = skb->len;
+	trace_net_dev_start_xmit(skb, dev);
+	rc = netdev_start_xmit(skb, dev, txq, more); // 패킷 전송
+	trace_net_dev_xmit(skb, rc, dev, len);
+
+	return rc;
+}
+```
+
+
+### netdev_start_xmit()
+```c
+static inline netdev_tx_t netdev_start_xmit(struct sk_buff *skb, struct net_device *dev,
+					    struct netdev_queue *txq, bool more)
+{
+	const struct net_device_ops *ops = dev->netdev_ops;
+	netdev_tx_t rc;
+
+	rc = __netdev_start_xmit(ops, skb, dev, more); // 디바이스로 전송
+	if (rc == NETDEV_TX_OK)
+		txq_trans_update(dev, txq);
+
+	return rc;
+}
+```
+
+
+### \_\_netdev_start_xmit()
+```c
+static inline netdev_tx_t __netdev_start_xmit(const struct net_device_ops *ops,
+					      struct sk_buff *skb, struct net_device *dev,
+					      bool more)
+{
+	netdev_xmit_set_more(more);
+	return ops->ndo_start_xmit(skb, dev); // 드라이버로 넘김
+}
+```
+
+
+### ice_start_xmit()
+```c
+/**
+ * ice_start_xmit - Selects the correct VSI and Tx queue to send buffer
+ * @skb: send buffer
+ * @netdev: network interface device structure
+ *
+ * Returns NETDEV_TX_OK if sent, else an error code
+ */
+netdev_tx_t ice_start_xmit(struct sk_buff *skb, struct net_device *netdev)
+{
+	struct ice_netdev_priv *np = netdev_priv(netdev);
+	struct ice_vsi *vsi = np->vsi;
+	struct ice_tx_ring *tx_ring;
+
+	tx_ring = vsi->tx_rings[skb->queue_mapping]; // skb와 매핑된 tx_ring
+
+	/* hardware can't handle really short frames, hardware padding works
+	 * beyond this point
+	 */
+	if (skb_put_padto(skb, ICE_MIN_TX_LEN)) //패딩
+		return NETDEV_TX_OK;
+
+	return ice_xmit_frame_ring(skb, tx_ring);
+}
+```
+
+
+### ice_xmit_frame_ring()
+```c
+/**
+ * ice_xmit_frame_ring - Sends buffer on Tx ring
+ * @skb: send buffer
+ * @tx_ring: ring to send buffer on
+ *
+ * Returns NETDEV_TX_OK if sent, else an error code
+ */
+static netdev_tx_t
+ice_xmit_frame_ring(struct sk_buff *skb, struct ice_tx_ring *tx_ring)
+{
+	struct ice_tx_offload_params offload = { 0 };
+	struct ice_vsi *vsi = tx_ring->vsi;
+	struct ice_tx_buf *first;
+	struct ethhdr *eth;
+	unsigned int count;
+	int tso, csum;
+
+	ice_trace(xmit_frame_ring, tx_ring, skb);
+
+	if (unlikely(ipv6_hopopt_jumbo_remove(skb)))
+		goto out_drop;
+
+	count = ice_xmit_desc_count(skb);
+	if (ice_chk_linearize(skb, count)) {
+		if (__skb_linearize(skb))
+			goto out_drop;
+		count = ice_txd_use_count(skb->len);
+		tx_ring->ring_stats->tx_stats.tx_linearize++;
+	}
+
+	/* need: 1 descriptor per page * PAGE_SIZE/ICE_MAX_DATA_PER_TXD,
+	 *       + 1 desc for skb_head_len/ICE_MAX_DATA_PER_TXD,
+	 *       + 4 desc gap to avoid the cache line where head is,
+	 *       + 1 desc for context descriptor,
+	 * otherwise try next time
+	 */
+	if (ice_maybe_stop_tx(tx_ring, count + ICE_DESCS_PER_CACHE_LINE +
+			      ICE_DESCS_FOR_CTX_DESC)) {
+		tx_ring->ring_stats->tx_stats.tx_busy++;
+		return NETDEV_TX_BUSY;
+	}
+
+	/* prefetch for bql data which is infrequently used */
+	netdev_txq_bql_enqueue_prefetchw(txring_txq(tx_ring));
+
+	offload.tx_ring = tx_ring;
+
+	/* record the location of the first descriptor for this packet */
+	first = &tx_ring->tx_buf[tx_ring->next_to_use];
+	first->skb = skb;
+	first->type = ICE_TX_BUF_SKB;
+	first->bytecount = max_t(unsigned int, skb->len, ETH_ZLEN);
+	first->gso_segs = 1;
+	first->tx_flags = 0;
+
+	/* prepare the VLAN tagging flags for Tx */
+	ice_tx_prepare_vlan_flags(tx_ring, first);
+	if (first->tx_flags & ICE_TX_FLAGS_HW_OUTER_SINGLE_VLAN) {
+		offload.cd_qw1 |= (u64)(ICE_TX_DESC_DTYPE_CTX |
+					(ICE_TX_CTX_DESC_IL2TAG2 <<
+					ICE_TXD_CTX_QW1_CMD_S));
+		offload.cd_l2tag2 = first->vid;
+	}
+
+	/* set up TSO offload */
+	tso = ice_tso(first, &offload);
+	if (tso < 0)
+		goto out_drop;
+
+	/* always set up Tx checksum offload */
+	csum = ice_tx_csum(first, &offload);
+	if (csum < 0)
+		goto out_drop;
+
+	/* allow CONTROL frames egress from main VSI if FW LLDP disabled */
+	eth = (struct ethhdr *)skb_mac_header(skb);
+
+	if ((ice_is_switchdev_running(vsi->back) ||
+	     ice_lag_is_switchdev_running(vsi->back)) &&
+	    vsi->type != ICE_VSI_SF)
+		ice_eswitch_set_target_vsi(skb, &offload);
+	else if (unlikely((skb->priority == TC_PRIO_CONTROL ||
+			   eth->h_proto == htons(ETH_P_LLDP)) &&
+			   vsi->type == ICE_VSI_PF &&
+			   vsi->port_info->qos_cfg.is_sw_lldp))
+		offload.cd_qw1 |= (u64)(ICE_TX_DESC_DTYPE_CTX |
+					ICE_TX_CTX_DESC_SWTCH_UPLINK <<
+					ICE_TXD_CTX_QW1_CMD_S);
+
+	ice_tstamp(tx_ring, skb, first, &offload);
+	//헤더 설정
+	
+	if (offload.cd_qw1 & ICE_TX_DESC_DTYPE_CTX) {
+		struct ice_tx_ctx_desc *cdesc;
+		u16 i = tx_ring->next_to_use;
+
+		/* grab the next descriptor */
+		cdesc = ICE_TX_CTX_DESC(tx_ring, i);
+		i++;
+		tx_ring->next_to_use = (i < tx_ring->count) ? i : 0;
+
+		/* setup context descriptor */
+		cdesc->tunneling_params = cpu_to_le32(offload.cd_tunnel_params);
+		cdesc->l2tag2 = cpu_to_le16(offload.cd_l2tag2);
+		cdesc->gcs = cpu_to_le16(offload.cd_gcs_params);
+		cdesc->qw1 = cpu_to_le64(offload.cd_qw1);
+	}
+
+	ice_tx_map(tx_ring, first, &offload);
+	return NETDEV_TX_OK;
+
+out_drop:
+	ice_trace(xmit_frame_ring_drop, tx_ring, skb);
+	dev_kfree_skb_any(skb);
+	return NETDEV_TX_OK;
+}
+```
+
+
+### ice_tx_map()
+```c
+/**
+ * ice_tx_map - Build the Tx descriptor
+ * @tx_ring: ring to send buffer on
+ * @first: first buffer info buffer to use
+ * @off: pointer to struct that holds offload parameters
+ *
+ * This function loops over the skb data pointed to by *first
+ * and gets a physical address for each memory location and programs
+ * it and the length into the transmit descriptor.
+ */
+static void
+ice_tx_map(struct ice_tx_ring *tx_ring, struct ice_tx_buf *first,
+	   struct ice_tx_offload_params *off)
+{
+	u64 td_offset, td_tag, td_cmd;
+	u16 i = tx_ring->next_to_use;
+	unsigned int data_len, size;
+	struct ice_tx_desc *tx_desc;
+	struct ice_tx_buf *tx_buf;
+	struct sk_buff *skb;
+	skb_frag_t *frag;
+	dma_addr_t dma;
+	bool kick;
+
+	td_tag = off->td_l2tag1;
+	td_cmd = off->td_cmd;
+	td_offset = off->td_offset;
+	skb = first->skb;
+
+	data_len = skb->data_len;
+	size = skb_headlen(skb);
+
+	tx_desc = ICE_TX_DESC(tx_ring, i); // 사용 가능한 디스크립터
+
+	if (first->tx_flags & ICE_TX_FLAGS_HW_VLAN) {
+		td_cmd |= (u64)ICE_TX_DESC_CMD_IL2TAG1;
+		td_tag = first->vid;
+	}
+
+	dma = dma_map_single(tx_ring->dev, skb->data, size, DMA_TO_DEVICE);
+	// dma 주소 매핑
+	tx_buf = first;
+
+	for (frag = &skb_shinfo(skb)->frags[0];; frag++) {
+	//fragments 처리리
+		unsigned int max_data = ICE_MAX_DATA_PER_TXD_ALIGNED;
+
+		if (dma_mapping_error(tx_ring->dev, dma))
+			goto dma_error;
+
+		/* record length, and DMA address */
+		dma_unmap_len_set(tx_buf, len, size);
+		dma_unmap_addr_set(tx_buf, dma, dma);
+
+		/* align size to end of page */
+		max_data += -dma & (ICE_MAX_READ_REQ_SIZE - 1);
+		tx_desc->buf_addr = cpu_to_le64(dma);
+
+		/* account for data chunks larger than the hardware
+		 * can handle
+		 */
+		 // 하드웨어가 처리할 수 있는 것보다 크기가 더 큰 경우 분할
+		while (unlikely(size > ICE_MAX_DATA_PER_TXD)) {
+			tx_desc->cmd_type_offset_bsz =
+				ice_build_ctob(td_cmd, td_offset, max_data,
+					       td_tag);
+
+			tx_desc++;
+			i++;
+
+			if (i == tx_ring->count) {
+				tx_desc = ICE_TX_DESC(tx_ring, 0);
+				i = 0;
+			}
+
+			dma += max_data;
+			size -= max_data;
+
+			max_data = ICE_MAX_DATA_PER_TXD_ALIGNED;
+			tx_desc->buf_addr = cpu_to_le64(dma);
+		}
+
+		if (likely(!data_len))
+			break;
+
+		tx_desc->cmd_type_offset_bsz = ice_build_ctob(td_cmd, td_offset,
+							      size, td_tag);
+
+		tx_desc++;
+		i++;
+
+		if (i == tx_ring->count) {
+			tx_desc = ICE_TX_DESC(tx_ring, 0);
+			i = 0;
+		}
+
+		size = skb_frag_size(frag);
+		data_len -= size;
+
+		dma = skb_frag_dma_map(tx_ring->dev, frag, 0, size,
+				       DMA_TO_DEVICE);
+		//fragment에 주소 매핑핑
+
+		tx_buf = &tx_ring->tx_buf[i];
+		tx_buf->type = ICE_TX_BUF_FRAG;
+	}
+
+	/* record SW timestamp if HW timestamp is not available */
+	skb_tx_timestamp(first->skb);
+
+	i++;
+	if (i == tx_ring->count)
+		i = 0;
+
+	/* write last descriptor with RS and EOP bits */
+	td_cmd |= (u64)ICE_TXD_LAST_DESC_CMD;
+	tx_desc->cmd_type_offset_bsz =
+			ice_build_ctob(td_cmd, td_offset, size, td_tag);
+
+	/* Force memory writes to complete before letting h/w know there
+	 * are new descriptors to fetch.
+	 *
+	 * We also use this memory barrier to make certain all of the
+	 * status bits have been updated before next_to_watch is written.
+	 */
+	wmb();
+
+	/* set next_to_watch value indicating a packet is present */
+	first->next_to_watch = tx_desc;
+
+	tx_ring->next_to_use = i;
+
+	ice_maybe_stop_tx(tx_ring, DESC_NEEDED);
+	// tx_ring이 가득 찼는지 확인하고 가득 찼다면 멈춤.
+
+	/* notify HW of packet */
+	kick = __netdev_tx_sent_queue(txring_txq(tx_ring), first->bytecount,
+				      netdev_xmit_more()); // NIC에게 알림.
+	if (kick)
+		/* notify HW of packet */
+		writel(i, tx_ring->tail);
+
+	return;
+
+dma_error:
+	/* clear DMA mappings for failed tx_buf map */
+	for (;;) {
+		tx_buf = &tx_ring->tx_buf[i];
+		ice_unmap_and_free_tx_buf(tx_ring, tx_buf);
+		if (tx_buf == first)
+			break;
+		if (i == 0)
+			i = tx_ring->count;
+		i--;
+	}
+
+	tx_ring->next_to_use = i;
+}
+```
+
+
+### \_\_netdev_tx_sent_queue()
+
+
 

@@ -46,3 +46,5 @@ void __release_sock(struct sock *sk)
 	- 두번째 do-while 문
 		- `sk_backlog_rcv()` 함수로 프로토콜에 맞는 함수 실행
 	- while문 종료 전 다시 스핀 락을 잡고 실행 도중 새로 백로그에 sk_buff가 들어왔는지 확인 후 반복
+
+[[sk_backlog_rcv()]]

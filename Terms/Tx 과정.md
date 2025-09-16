@@ -2211,7 +2211,7 @@ ice_tx_map(struct ice_tx_ring *tx_ring, struct ice_tx_buf *first,
 	tx_buf = first;
 
 	for (frag = &skb_shinfo(skb)->frags[0];; frag++) {
-	//fragments 처리리
+	//fragments 처리
 		unsigned int max_data = ICE_MAX_DATA_PER_TXD_ALIGNED;
 
 		if (dma_mapping_error(tx_ring->dev, dma))
@@ -2268,7 +2268,7 @@ ice_tx_map(struct ice_tx_ring *tx_ring, struct ice_tx_buf *first,
 
 		dma = skb_frag_dma_map(tx_ring->dev, frag, 0, size,
 				       DMA_TO_DEVICE);
-		//fragment에 주소 매핑핑
+		//fragment에 주소 매핑
 
 		tx_buf = &tx_ring->tx_buf[i];
 		tx_buf->type = ICE_TX_BUF_FRAG;
@@ -2329,6 +2329,71 @@ dma_error:
 
 
 ### \_\_netdev_tx_sent_queue()
+```c
+/* Variant of netdev_tx_sent_queue() for drivers that are aware
+ * that they should not test BQL status themselves.
+ * We do want to change __QUEUE_STATE_STACK_XOFF only for the last
+ * skb of a batch.
+ * Returns true if the doorbell must be used to kick the NIC.
+ */
+static inline bool __netdev_tx_sent_queue(struct netdev_queue *dev_queue,
+					  unsigned int bytes,
+					  bool xmit_more)
+{
+	if (xmit_more) {
+#ifdef CONFIG_BQL
+		dql_queued(&dev_queue->dql, bytes);
+#endif
+		return netif_tx_queue_stopped(dev_queue); // kick 생략
+	}
+	netdev_tx_sent_queue(dev_queue, bytes); // kick
+	return true;
+}
+```
+
+
+### netdev_tx_sent_queue()
+```c
+/**
+ *	netdev_tx_sent_queue - report the number of bytes queued to a given tx queue
+ *	@dev_queue: network device queue
+ *	@bytes: number of bytes queued to the device queue
+ *
+ *	Report the number of bytes queued for sending/completion to the network
+ *	device hardware queue. @bytes should be a good approximation and should
+ *	exactly match netdev_completed_queue() @bytes.
+ *	This is typically called once per packet, from ndo_start_xmit().
+ */
+static inline void netdev_tx_sent_queue(struct netdev_queue *dev_queue,
+					unsigned int bytes)
+{
+#ifdef CONFIG_BQL
+	dql_queued(&dev_queue->dql, bytes);
+
+	if (likely(dql_avail(&dev_queue->dql) >= 0))
+		return;
+
+	/* Paired with READ_ONCE() from dev_watchdog() */
+	WRITE_ONCE(dev_queue->trans_start, jiffies);
+
+	/* This barrier is paired with smp_mb() from dev_watchdog() */
+	smp_mb__before_atomic();
+
+	set_bit(__QUEUE_STATE_STACK_XOFF, &dev_queue->state);
+
+	/*
+	 * The XOFF flag must be set before checking the dql_avail below,
+	 * because in netdev_tx_completed_queue we update the dql_completed
+	 * before checking the XOFF flag.
+	 */
+	smp_mb__after_atomic();
+
+	/* check again in case another CPU has just made room avail */
+	if (unlikely(dql_avail(&dev_queue->dql) >= 0))
+		clear_bit(__QUEUE_STATE_STACK_XOFF, &dev_queue->state);
+#endif
+}
+```
 
 
 

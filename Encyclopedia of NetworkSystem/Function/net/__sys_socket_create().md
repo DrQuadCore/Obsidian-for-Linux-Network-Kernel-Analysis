@@ -25,3 +25,7 @@ static struct socket *__sys_socket_create(int family, int type, int protocol)
 }
 ```
 
+`socket_create()` 함수는 wrapper 함수로 `__socket_create()` 함수를 호출한다.
+
+`__socket_create()` 함수에서 `security_socket_create(family, type, protocol, kern)`을 통해 보안을 검사하고 `sock_alloc()` 함수로 새로운 inode를 받아 `socket` 구조체와 연결한다
+

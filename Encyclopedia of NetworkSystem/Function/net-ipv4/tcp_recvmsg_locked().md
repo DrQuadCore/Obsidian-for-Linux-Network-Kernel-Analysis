@@ -69,13 +69,13 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 
 		last = skb_peek_tail(&sk->sk_receive_queue); // 수신 큐의 마지막 패킷
 		 // 수신 큐 반복
-		skb_queue_walk(&sk->sk_receive_queue, skb) {
+		*skb_queue_walk(&sk->sk_receive_queue, skb) {
 			last = skb;
 			/* Now that we have two receive queues this
 			 * shouldn't happen.
 			 */
 			if (WARN(before(*seq, TCP_SKB_CB(skb)->seq),
-				 "TCP recvmsg seq # bug: copied %X, seq %X, rcvnxt %X, fl %X\n",
+				 "TCP* recvmsg seq # bug: copied %X, seq %X, rcvnxt %X, fl %X\n",
 				 *seq, TCP_SKB_CB(skb)->seq, tp->rcv_nxt,
 				 flags))
 				break;
@@ -97,7 +97,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 		}
 
 		/* Well, if we have backlog, try to process it now yet. */
-
+		// 최소 바이트 이상 수신했고, 백로그에 패킷이 없다면 종료
 		if (copied >= target && !READ_ONCE(sk->sk_backlog.tail))
 			break;
 
@@ -142,7 +142,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 		// 최소 바이트 이상 수신 시 백로그에 있는 패킷 처리
 		if (copied >= target) {
 			/* Do not sleep, just process backlog. */
-			__sk_flush_backlog(sk);
+			__sk_flush_backlog(sk);  // [[__sk_flush_backlog()]]
 		} else { // 최소 바이트 미달성 시 윈도우 업데이트 후 기다림
 			tcp_cleanup_rbuf(sk, copied);
 			err = sk_wait_data(sk, &timeo, last);
@@ -187,6 +187,7 @@ found_ok_skb:
 
 		if (!(flags & MSG_TRUNC)) {
 			err = skb_copy_datagram_msg(skb, offset, msg, used);
+			// [[skb_copy_datagram_msg()]]
 			if (err) {
 				/* Exception. Bailout! */
 				if (!copied)

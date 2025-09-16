@@ -45,4 +45,4 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
  - `sock_map_fd()` 함수를 호출해 socket 구조체와 파일 디스크립터를 매핑한다.
 
 [[__sys_socket_create()]]
-sock_map_fd()
+[[sock_map_fd()]]

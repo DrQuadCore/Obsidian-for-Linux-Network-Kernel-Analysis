@@ -26,3 +26,4 @@ EXPORT_SYMBOL(lock_sock_nested);
 - 소켓이 사용자 공간에서 사용 중인지 확인하고 사용 중이라면 `__lock_sock()` 함수로 대기
 - 소켓을 소유하게 되면 스핀 락을 해제하고 함수 종료
 
+[[__lock_sock()]]

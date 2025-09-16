@@ -36,7 +36,7 @@ size_t iterate_and_advance(struct iov_iter *iter, size_t len, void *priv,
 }
 ```
 NULL을 추가로 넘겨주면서 `iterate_and_advance2()` 함수로 넘어간다.
-- iter: 반복자(이전 함수에서 `i` == `msg->iter`)
+- iter: 반복자(이전 함수에서 `i` == `msg->iter` == `ubuf`)
 - len: 반복하는 크기(이전 함수에서 `bytes`)
 - priv: 시작하는 위치(이전 함수에서 `addr`)
 - ustep: 유저 영역의 주소로 ubuf 또는 iovec 반복할 함수(`copy_to_user_iter()`)

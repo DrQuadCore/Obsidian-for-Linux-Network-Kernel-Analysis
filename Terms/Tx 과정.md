@@ -358,7 +358,7 @@ int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)
 	// 전송 타임아웃 계산
 
 	tcp_rate_check_app_limited(sk);  /* is sending application-limited? */
-	// 제한속도 체크
+	// applcation-limited 여부 확인
 
 	/* Wait for a connection to finish. One exception is TCP Fast Open
 	 * (passive side) where data is allowed to be sent before a connection

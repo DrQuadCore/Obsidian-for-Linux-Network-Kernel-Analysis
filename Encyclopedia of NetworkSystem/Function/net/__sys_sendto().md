@@ -111,3 +111,4 @@ int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr_storage *k
 - socket의 주소를 kernel space로 복사한다. 이는 addr이 NULL 이 아닌 sendto() 를 사용할 때 호출된다.
 
 [[__sock_sendmsg()]]
+[[copy_from_user()]]

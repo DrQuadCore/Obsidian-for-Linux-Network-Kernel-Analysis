@@ -50,7 +50,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 		seq = &peek_seq;
 	}
 
-	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len); // 최소로 읽을 바이트 수수 설정
+	target = sock_rcvlowat(sk, flags & MSG_WAITALL, len); // 최소로 읽을 바이트 수 설정
 
 	do {
 		u32 offset;
@@ -68,7 +68,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 		/* Next get a buffer. */
 
 		last = skb_peek_tail(&sk->sk_receive_queue); // 수신 큐의 마지막 패킷
-		 // 수신 큐 반복
+		 // 수신 큐에서 sk_buff 하나씩 꺼내어 반복
 		*skb_queue_walk(&sk->sk_receive_queue, skb) {
 			last = skb;
 			/* Now that we have two receive queues this
@@ -82,7 +82,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 			
 			// offset: sk_buff 내에서 읽기 시작할 위치
 			offset = *seq - TCP_SKB_CB(skb)->seq;
-			// TCP 플래그 처리리
+			// TCP 플래그 처리
 			if (unlikely(TCP_SKB_CB(skb)->tcp_flags & TCPHDR_SYN)) {
 				pr_err_once("%s: found a SYN, please report !\n", __func__);
 				offset--;
@@ -94,7 +94,7 @@ static int tcp_recvmsg_locked(struct sock *sk, struct msghdr *msg, size_t len,
 			WARN(!(flags & MSG_PEEK),
 			     "TCP recvmsg seq # bug 2: copied %X, seq %X, rcvnxt %X, fl %X\n",
 			     *seq, TCP_SKB_CB(skb)->seq, tp->rcv_nxt, flags);
-		}
+		} // 수신 큐 반복 종료
 
 		/* Well, if we have backlog, try to process it now yet. */
 		// 최소 바이트 이상 수신했고, 백로그에 패킷이 없다면 종료
@@ -228,7 +228,7 @@ found_fin_ok:
 		if (!(flags & MSG_PEEK))
 			tcp_eat_recv_skb(sk, skb);
 		break;
-	} while (len > 0);
+	} while (len > 0); // 전체 반복문 종료
 
 	/* According to UNIX98, msg_name/msg_namelen are ignored
 	 * on connected socket. I was just happy when found this 8) --ANK

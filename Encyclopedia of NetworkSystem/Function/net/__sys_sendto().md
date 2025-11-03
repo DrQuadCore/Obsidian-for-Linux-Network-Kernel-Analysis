@@ -80,6 +80,7 @@ struct socket *sock_from_file(struct file *file)
 - 조건문에서 파일이 소켓 파일인지 체크하고 file->private_data를 반환한다.
 - file->private_data는 소켓을 생성하면서 파일과 소켓을 연결할 때 정해진다.
   [[sock_alloc_file()]]
+	- file->private_data에는 각 드라이버나 파일시스템이 추가적으로 필요한 정보를 담는 멤버다.
 - 결국 반환하는 것은 파일과 연결된 struct socket  이다.
 
 ---

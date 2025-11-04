@@ -265,6 +265,7 @@ int inet_send_prepare(struct sock *sk)
 -  net/ipv4/af_inet.c에 구현되어있습니다.
 - RPS flow를 기록합니다.
 - sk에 port가 바인딩되어있지 않다면 자동으로 port를 바인딩합니다.
+- RPS를 먼저 기록하고, port를 뒤에 할당받는 기이한 구조입니다...
 ### tcp_sendmsg()
 ```c
 int tcp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)

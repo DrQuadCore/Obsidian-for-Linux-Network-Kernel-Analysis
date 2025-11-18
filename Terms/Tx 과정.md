@@ -755,6 +755,7 @@ void tcp_push(struct sock *sk, int flags, int mss_now,
 		return;
 	if (!(flags & MSG_MORE) || forced_push(tp))
 		tcp_mark_push(tp, skb);
+		// 주로 마지막 패킷인 경우 PUSH 플래그를 활성화하여 수신측에서 다음 패킷을 기다리지 않도록 유도
 
 	tcp_mark_urg(tp, flags);
 

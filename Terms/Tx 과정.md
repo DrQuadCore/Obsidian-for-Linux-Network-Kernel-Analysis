@@ -1042,7 +1042,7 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 	skb->ooo_okay = sk_wmem_alloc_get(sk) < SKB_TRUESIZE(1) ||
 			tcp_rtx_queue_empty(sk);
 	// write buffer와 retransmission queue가 비어있는 경우에만 xps 허용
-	// order가 꼬이는 것을 방지지
+	// order가 꼬이는 것을 방지
 
 	/* If we had to use memory reserve to allocate this skb,
 	 * this might cause drops if packet is looped back :

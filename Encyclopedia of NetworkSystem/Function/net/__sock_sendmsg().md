@@ -99,4 +99,4 @@ static inline int sock_sendmsg_nosec(struct socket *sock, struct msghdr *msg)
 - 매크로 함수를 통해 IP 버전에 따라 알맞은 inet_sendmsg() 또는 inet6_sendmsg() 함수를 호출한다.
 - ipv4는  inet_sendmsg() 를 호출한다.
 
-
+[[inet_sendmsg()]]

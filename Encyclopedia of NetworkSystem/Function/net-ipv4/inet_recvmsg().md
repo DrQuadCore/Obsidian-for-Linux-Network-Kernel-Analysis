@@ -77,5 +77,5 @@ struct proto {
 }
 ```
 
-sock_rps_record_flow()
+[[sock_rps_record_flow()]]
 [[tcp_recvmsg()]]

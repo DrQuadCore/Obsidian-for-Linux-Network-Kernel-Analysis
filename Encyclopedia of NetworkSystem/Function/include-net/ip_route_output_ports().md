@@ -66,6 +66,6 @@ struct flowi4 {
 } __attribute__((__aligned__(BITS_PER_LONG/8)));
 ```
 
-flowi4 구조체는 위와 같이 source address, destination address, protocol 등을 비롯한 필드로 구성돼 있다. 이후 라우팅 테이블을 lookup할 때 key 값으로 쓰인다.
+flowi4 구조체는 위와 같이 source address, destination address, protocol 등을 비롯한 필드로 구성돼 있다. 이후 FIB 테이블을 lookup 해서 얻은 라우팅 엔트리를 사용할 수 있는지 판단할 때 사용한다.
 
 

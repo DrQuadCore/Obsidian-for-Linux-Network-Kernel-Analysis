@@ -432,7 +432,7 @@ new_segment:
 			//process_backlog가 꽉찼다면 flush합니다
 			
 			first_skb = tcp_rtx_and_write_queues_empty(sk);
-			// rtx와 write 큐가 비어있는지 확인
+			// rtx와 write 큐가 비어있는지r 확인
 			skb = tcp_stream_alloc_skb(sk, sk->sk_allocation,
 						   first_skb);
 			// skb 할당

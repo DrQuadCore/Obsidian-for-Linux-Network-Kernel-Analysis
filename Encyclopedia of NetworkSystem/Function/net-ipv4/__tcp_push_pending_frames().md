@@ -52,7 +52,7 @@ static inline void tcp_check_probe_timer(struct sock *sk)
 ```
 - 전송 대기 중인 TCP 패킷이 없고(`tcp_sock->packets_out` == 0)
 - 예약된 타이머가 없다면(`inet_connection_sock->icsk_pending` == 0)
-- probe timer 초기화
+- probe timer 초기화(tcp_reset_xmit_timer())
 ### tcp_reset_xmit_timer()
 ```c title=tcp_reset_xmit_timer()
 static inline void tcp_reset_xmit_timer(struct sock *sk,

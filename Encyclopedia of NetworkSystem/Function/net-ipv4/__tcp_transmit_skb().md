@@ -247,6 +247,188 @@ static int __tcp_transmit_skb(struct sock *sk, struct sk_buff *skb,
 [[ip_queue_xmit()]]
 
 ---
+- line 35~63
+```c title=line35~63
+	if (clone_it) { // clone_it이 1인 경우 skb 복제 (추후 재전송을 위해 복제)
+		oskb = skb;
+
+		tcp_skb_tsorted_save(oskb) {
+			if (unlikely(skb_cloned(oskb)))
+				skb = pskb_copy(oskb, gfp_mask);
+			// 이미 복사된 skb라면 (다른 곳에서 참조중이라면) deep copy
+			else
+				skb = skb_clone(oskb, gfp_mask);
+				// 그렇지 않으면 shallow copy
+		} tcp_skb_tsorted_restore(oskb);
+
+		if (unlikely(!skb))
+			return -ENOBUFS;
+		/* retransmit skbs might have a non zero value in skb->dev
+		 * because skb->dev is aliased with skb->rbnode.rb_left
+		 */
+		skb->dev = NULL;
+	}
+```
+- 매개변수로 받은 *clone_it*은 1이므로 반드시 복사가 진행된다
+```c
+#define tcp_skb_tsorted_save(skb) {		\
+	unsigned long _save = skb->_skb_refdst;	\
+	skb->_skb_refdst = 0UL;
+
+#define tcp_skb_tsorted_restore(skb)		\
+	skb->_skb_refdst = _save;		\
+}
+```
+- 기존의 *oskb*의 멤버변수 `_skb_refdst`를 임시로 0으로 만든다
+### skb_cloned()
+```c title=skb_cloned()
+/**
+ *	skb_cloned - is the buffer a clone
+ *	@skb: buffer to check
+ *
+ *	Returns true if the buffer was generated with skb_clone() and is
+ *	one of multiple shared copies of the buffer. Cloned buffers are
+ *	shared data so must not be written to under normal circumstances.
+ */
+static inline int skb_cloned(const struct sk_buff *skb)
+{
+	return skb->cloned &&
+	       (atomic_read(&skb_shinfo(skb)->dataref) & SKB_DATAREF_MASK) != 1;
+}
+```
+- *oskb*가 이미 `skb_clone()` 함수에 의해 만들어졌고(`skb->cloned==1`), 동시에 기존의 참조카운트카 1 초과라면 얕은 복사를 할 수 없으므로 깊은 복사를 시도
+
+### skb_clone()
+
+```c title=skb_clone()
+/**
+ *	skb_clone	-	duplicate an sk_buff
+ *	@skb: buffer to clone
+ *	@gfp_mask: allocation priority
+ *
+ *	Duplicate an &sk_buff. The new one is not owned by a socket. Both
+ *	copies share the same packet data but not structure. The new
+ *	buffer has a reference count of 1. If the allocation fails the
+ *	function returns %NULL otherwise the new buffer is returned.
+ *
+ *	If this function is called from an interrupt gfp_mask() must be
+ *	%GFP_ATOMIC.
+ */
+
+struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
+{
+	struct sk_buff_fclones *fclones = container_of(skb,
+						       struct sk_buff_fclones,
+						       skb1);
+	struct sk_buff *n;
+
+	if (skb_orphan_frags(skb, gfp_mask))
+		return NULL;
+
+	if (skb->fclone == SKB_FCLONE_ORIG &&
+	    refcount_read(&fclones->fclone_ref) == 1) {
+		n = &fclones->skb2;
+		refcount_set(&fclones->fclone_ref, 2);
+		n->fclone = SKB_FCLONE_CLONE;
+	} else {
+		if (skb_pfmemalloc(skb))
+			gfp_mask |= __GFP_MEMALLOC;
+
+		n = kmem_cache_alloc(net_hotdata.skbuff_cache, gfp_mask);
+		if (!n)
+			return NULL;
+
+		n->fclone = SKB_FCLONE_UNAVAILABLE;
+	}
+
+	return __skb_clone(n, skb);
+}
+EXPORT_SYMBOL(skb_clone);
+```
+
+### pskb_copy()
+```c pskb_copy()
+// /include/linux/skbuff.h
+static inline struct sk_buff *pskb_copy(struct sk_buff *skb,
+					gfp_t gfp_mask)
+{
+	return __pskb_copy(skb, skb_headroom(skb), gfp_mask);
+}
+static inline struct sk_buff *__pskb_copy(struct sk_buff *skb, int headroom,
+					  gfp_t gfp_mask)
+{
+	return __pskb_copy_fclone(skb, headroom, gfp_mask, false);
+}
+
+
+// /net/core/skbuff.c
+/**
+ *	__pskb_copy_fclone	-  create copy of an sk_buff with private head.
+ *	@skb: buffer to copy
+ *	@headroom: headroom of new skb
+ *	@gfp_mask: allocation priority
+ *	@fclone: if true allocate the copy of the skb from the fclone
+ *	cache instead of the head cache; it is recommended to set this
+ *	to true for the cases where the copy will likely be cloned
+ *
+ *	Make a copy of both an &sk_buff and part of its data, located
+ *	in header. Fragmented data remain shared. This is used when
+ *	the caller wishes to modify only header of &sk_buff and needs
+ *	private copy of the header to alter. Returns %NULL on failure
+ *	or the pointer to the buffer on success.
+ *	The returned buffer has a reference count of 1.
+ */
+
+struct sk_buff *__pskb_copy_fclone(struct sk_buff *skb, int headroom,
+				   gfp_t gfp_mask, bool fclone)
+{
+	unsigned int size = skb_headlen(skb) + headroom;
+	int flags = skb_alloc_rx_flag(skb) | (fclone ? SKB_ALLOC_FCLONE : 0);
+	struct sk_buff *n = __alloc_skb(size, gfp_mask, flags, NUMA_NO_NODE);
+
+	if (!n)
+		goto out;
+
+	/* Set the data pointer */
+	skb_reserve(n, headroom);
+	/* Set the tail pointer and length */
+	skb_put(n, skb_headlen(skb));
+	/* Copy the bytes */
+	skb_copy_from_linear_data(skb, n->data, n->len);
+
+	n->truesize += skb->data_len;
+	n->data_len  = skb->data_len;
+	n->len	     = skb->len;
+
+	if (skb_shinfo(skb)->nr_frags) {
+		int i;
+
+		if (skb_orphan_frags(skb, gfp_mask) ||
+		    skb_zerocopy_clone(n, skb, gfp_mask)) {
+			kfree_skb(n);
+			n = NULL;
+			goto out;
+		}
+		for (i = 0; i < skb_shinfo(skb)->nr_frags; i++) {
+			skb_shinfo(n)->frags[i] = skb_shinfo(skb)->frags[i];
+			skb_frag_ref(skb, i);
+		}
+		skb_shinfo(n)->nr_frags = i;
+	}
+
+	if (skb_has_frag_list(skb)) {
+		skb_shinfo(n)->frag_list = skb_shinfo(skb)->frag_list;
+		skb_clone_fraglist(n);
+	}
+
+	skb_copy_header(n, skb);
+out:
+	return n;
+}
+EXPORT_SYMBOL(__pskb_copy_fclone);
+
+```
+---
 ### tcp_select_window()
 ```c title=tcp_select_window()
 /* Chose a new window to advertise, update state in tcp_sock for the

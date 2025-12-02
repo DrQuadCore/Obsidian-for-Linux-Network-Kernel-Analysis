@@ -44,7 +44,7 @@ static inline void tcp_mark_urg(struct tcp_sock *tp, int flags)
 		tp->snd_up = tp->write_seq;
 }
 ```
-- 자동 corking이 가능하다면 Transmit 큐에 대해서 플래그를 설정하여 지연시킵니다.
+- autocorking이 가능하다면 Transmit 큐에 대해서 플래그를 설정하여 지연시킵니다.
 - MSG_MORE 플래그가 활성되어있는 경우, nonagle 값을 변경합니다.
 ---
 - **nagle 알고리즘이란**
